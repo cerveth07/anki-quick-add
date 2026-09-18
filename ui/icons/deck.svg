@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none">
+  <!-- Three visually balanced deck layers, tuned for 16px Windows rendering. -->
+  <path d="M8 1.25 14.25 4.35 8 7.45 1.75 4.35 8 1.25Z" fill="#3F73E8"/>
+  <path d="M2.15 7.05 8 9.95l5.85-2.9" stroke="#3F73E8" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M2.15 10.15 8 13.05l5.85-2.9" stroke="#3F73E8" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

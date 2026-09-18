@@ -1,0 +1,101 @@
+name: Build Windows Package
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "*.py"
+      - "ui/**"
+      - "assets/**"
+      - "config.json"
+      - "LICENSE"
+      - "THIRD_PARTY_NOTICES.md"
+      - "licenses/**"
+      - "requirements.txt"
+      - "requirements-build.txt"
+      - "tools/AnkiQuickAdd-pyside6.spec"
+      - "tools/build_windows.ps1"
+      - ".github/workflows/build-exe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-build.txt
+
+      - name: Build Windows onedir package
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File tools/build_windows.ps1 -PythonLauncher python
+
+      - name: Check package layout
+        shell: pwsh
+        run: |
+          $required = @(
+            "dist/AnkiQuickAdd/AnkiQuickAdd.exe",
+            "dist/AnkiQuickAdd/_internal/PySide6/Qt6Core.dll",
+            "dist/AnkiQuickAdd/_internal/PySide6/Qt6Gui.dll",
+            "dist/AnkiQuickAdd/_internal/PySide6/Qt6Widgets.dll",
+            "dist/AnkiQuickAdd/LICENSE.txt",
+            "dist/AnkiQuickAdd/THIRD_PARTY_NOTICES.md",
+            "dist/AnkiQuickAdd/licenses/LGPL-3.0-only.txt",
+            "dist/AnkiQuickAdd/licenses/GPL-3.0-only.txt",
+            "dist/AnkiQuickAdd/licenses/PYTHON-3.12.txt",
+            "dist/AnkiQuickAdd/licenses/OPENSSL-3.txt",
+            "dist/AnkiQuickAdd/licenses/PYINSTALLER-6.16.0.txt",
+            "dist/AnkiQuickAdd/licenses/OFL-Inter.txt",
+            "dist/AnkiQuickAdd/licenses/OFL-SourceHanSans.txt",
+            "dist/AnkiQuickAdd/licenses/OFL-Noto.txt"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path -LiteralPath $path)) {
+              throw "Missing required package file: $path"
+            }
+          }
+          Write-Host "Qt/PySide6 shared libraries remain separate and replaceable."
+
+      - name: Smoke-test package
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath "dist/AnkiQuickAdd/AnkiQuickAdd.exe" -PassThru
+          Start-Sleep -Seconds 12
+          if ($process.HasExited) {
+            throw "AnkiQuickAdd.exe exited during startup with code $($process.ExitCode)."
+          }
+          Stop-Process -Id $process.Id -Force
+          Write-Host "Package startup smoke test passed."
+
+      - name: Create Windows ZIP
+        shell: pwsh
+        run: |
+          Push-Location dist
+          Compress-Archive -Path "AnkiQuickAdd" -DestinationPath "AnkiQuickAdd-Windows.zip" -CompressionLevel Optimal
+          Pop-Location
+          $sizeMB = [math]::Round((Get-Item "dist/AnkiQuickAdd-Windows.zip").Length / 1MB, 2)
+          Write-Host "AnkiQuickAdd-Windows.zip: $sizeMB MB"
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnkiQuickAdd-Windows
+          path: dist/AnkiQuickAdd-Windows.zip
+          if-no-files-found: error
+          retention-days: 14

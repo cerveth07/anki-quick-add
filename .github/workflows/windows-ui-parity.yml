@@ -1,0 +1,138 @@
+name: Windows UI Parity
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "*.py"
+      - "ui/**"
+      - "tools/capture_ui_parity.py"
+      - "tools/verify_runtime_behavior.py"
+      - ".github/workflows/windows-ui-parity.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  capture-windows-ui:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    env:
+      PYTHONUTF8: "1"
+      QT_OPENGL: software
+      QT_QPA_PLATFORM: windows
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PySide6
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "PySide6==6.9.2"
+
+      - name: Fetch pinned UI fonts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path "fonts" | Out-Null
+
+          $sourceHanArchive = Join-Path $env:RUNNER_TEMP "SourceHanSansSC-2.005R.zip"
+          $sourceHanExtract = Join-Path $env:RUNNER_TEMP "SourceHanSansSC-2.005R"
+          Invoke-WebRequest `
+            -Uri "https://github.com/adobe-fonts/source-han-sans/releases/download/2.005R/09_SourceHanSansSC.zip" `
+            -OutFile $sourceHanArchive `
+            -UseBasicParsing
+          Expand-Archive -LiteralPath $sourceHanArchive -DestinationPath $sourceHanExtract -Force
+          $sourceHanRegular = Get-ChildItem -LiteralPath $sourceHanExtract -Recurse -File -Filter "SourceHanSansSC-Regular.otf" | Select-Object -First 1
+          $sourceHanMedium = Get-ChildItem -LiteralPath $sourceHanExtract -Recurse -File -Filter "SourceHanSansSC-Medium.otf" | Select-Object -First 1
+          if ($null -eq $sourceHanRegular -or $null -eq $sourceHanMedium) {
+            throw "Source Han Sans SC Regular/Medium OTFs not found"
+          }
+          Copy-Item -Force -LiteralPath $sourceHanRegular.FullName -Destination "fonts/SourceHanSansSC-Regular.otf"
+          Copy-Item -Force -LiteralPath $sourceHanMedium.FullName -Destination "fonts/SourceHanSansSC-Medium.otf"
+
+          Invoke-WebRequest `
+            -Uri "https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/Sans/Variable/TTF/Subset/NotoSansJP-VF.ttf" `
+            -OutFile "fonts/NotoSansJP-VF.ttf" `
+            -UseBasicParsing
+
+          $archive = Join-Path $env:RUNNER_TEMP "Inter-4.1.zip"
+          $extract = Join-Path $env:RUNNER_TEMP "Inter-4.1"
+          Invoke-WebRequest `
+            -Uri "https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip" `
+            -OutFile $archive `
+            -UseBasicParsing
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+          $candidate = Get-ChildItem -LiteralPath $extract -Recurse -File -Filter "InterVariable.ttf" | Select-Object -First 1
+          if ($null -eq $candidate) {
+            throw "InterVariable.ttf not found in Inter 4.1 archive"
+          }
+          Copy-Item -Force -LiteralPath $candidate.FullName -Destination "fonts/Inter-VF.ttf"
+
+          $required = @(
+            "fonts/SourceHanSansSC-Regular.otf",
+            "fonts/SourceHanSansSC-Medium.otf",
+            "fonts/NotoSansJP-VF.ttf",
+            "fonts/Inter-VF.ttf"
+          )
+          foreach ($font in $required) {
+            if (-not (Test-Path -LiteralPath $font)) {
+              throw "Missing required font: $font"
+            }
+            $size = (Get-Item -LiteralPath $font).Length
+            if ($size -lt 500000) {
+              throw "Font file is unexpectedly small: $font ($size bytes)"
+            }
+            Write-Host "$font : $size bytes"
+          }
+
+      - name: Capture Windows Qt screenshots
+        shell: pwsh
+        run: |
+          python tools/capture_ui_parity.py
+
+      - name: Verify screenshots
+        shell: pwsh
+        run: |
+          $dir = "artifacts/ui-parity/current"
+          $expected = @(
+            "01-empty.png",
+            "02-paste-focus.png",
+            "03-preview-focus.png",
+            "04-prompt-popover.png",
+            "05-acceptance.png"
+          )
+          foreach ($name in $expected) {
+            $path = Join-Path $dir $name
+            if (-not (Test-Path -LiteralPath $path)) {
+              throw "Missing screenshot: $path"
+            }
+            $size = (Get-Item -LiteralPath $path).Length
+            if ($size -lt 1000) {
+              throw "Screenshot is unexpectedly small: $path ($size bytes)"
+            }
+            Write-Host "$path : $size bytes"
+          }
+
+      - name: Verify runtime behavior
+        shell: pwsh
+        run: |
+          python tools/verify_runtime_behavior.py
+
+      - name: Upload Windows UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-ui-parity-${{ github.run_number }}
+          path: artifacts/ui-parity/current/*.png
+          if-no-files-found: warn
+          retention-days: 14

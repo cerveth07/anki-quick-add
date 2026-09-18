@@ -1,0 +1,7 @@
+{
+  "deck_name": "",
+  "note_type": "问答题",
+  "front_field": "正面",
+  "back_field": "背面",
+  "anki_connect_url": "http://127.0.0.1:8765"
+}
