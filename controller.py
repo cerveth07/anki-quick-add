@@ -73,6 +73,7 @@ class QuickAddController:
         self.deck_names: tuple[str, ...] = ()
 
         self._gen = 0
+        self._connection_gen = 0
         self._debounce_token = 0
         self._last_check: Optional[tuple[str, object]] = None
         self._capabilities_ok: Optional[bool] = None
@@ -114,6 +115,20 @@ class QuickAddController:
         if state in (State.INVALID, State.DUPLICATE, State.ERROR, State.ANKI_OFFLINE):
             return "warn"
         return "info"
+
+    def retry_connection(self) -> None:
+        """Explicitly re-probe Anki without overwriting unrelated card status."""
+        if self.state is State.ADDING:
+            log.info("提交中，忽略重新连接")
+            return
+
+        self._capabilities_ok = None
+
+        def after_connection() -> None:
+            if self.card.is_complete():
+                self._schedule_check()
+
+        self._ensure_capabilities(after_connection, connection_only=True)
 
     def startup(self) -> None:
         gen = self._gen
@@ -237,15 +252,22 @@ class QuickAddController:
             self._capabilities_ok = None
             self._set_state(State.ERROR, f"⚠ {result.message}")
 
-    def _ensure_capabilities(self, then: Callable[[], None]) -> None:
+    def _ensure_capabilities(
+        self,
+        then: Callable[[], None],
+        *,
+        connection_only: bool = False,
+    ) -> None:
         if self._capabilities_ok:
             then()
             return
 
-        request_gen = self._gen
+        self._connection_gen += 1
+        request_connection_gen = self._connection_gen
         request_deck = self.deck
         self.view.set_connection("Anki 连接中…", "info")
-        self._set_state(State.CHECKING, "正在连接 Anki…")
+        if not connection_only:
+            self._set_state(State.CHECKING, "正在连接 Anki…")
 
         def job():
             try:
@@ -256,27 +278,37 @@ class QuickAddController:
                 return "error", exc
 
         def done(result, error) -> None:
-            if request_gen != self._gen or request_deck != self.deck:
+            if (
+                request_connection_gen != self._connection_gen
+                or request_deck != self.deck
+            ):
                 log.debug("丢弃过期能力校验结果：deck=%s", request_deck)
                 return
+
             if error is not None:
                 self._capabilities_ok = None
                 self.view.set_connection("Anki 连接异常", "warn")
                 log.exception("能力校验异常", exc_info=error)
-                self._set_state(State.ERROR, f"⚠ 检查 Anki 配置失败：{error}")
+                if not connection_only:
+                    self._set_state(State.ERROR, f"⚠ 检查 Anki 配置失败：{error}")
                 return
+
             kind, payload = result
             if kind == "offline":
                 self._capabilities_ok = None
                 self.view.set_connection("Anki 未连接", "warn")
-                self._set_state(State.ANKI_OFFLINE, "⚠ 未连接 Anki")
+                if not connection_only:
+                    self._set_state(State.ANKI_OFFLINE, "⚠ 未连接 Anki")
                 return
+
             if kind == "error":
                 self._capabilities_ok = None
                 self.view.set_connection("Anki 连接异常", "warn")
-                self._set_state(State.ERROR, f"⚠ {payload}")
+                if not connection_only:
+                    self._set_state(State.ERROR, f"⚠ {payload}")
                 return
 
+            # Transport is healthy even if a configured deck/model/field is not.
             self.view.set_connection("Anki 已连接", "ok")
             if payload.decks:
                 self.deck_names = payload.decks
@@ -286,12 +318,17 @@ class QuickAddController:
                     self.deck = selected_deck
                 self.view.set_deck_choices(payload.decks)
                 self.view.set_deck(self.deck)
+
             if payload.ok():
                 self._capabilities_ok = True
                 then()
-            else:
-                self._capabilities_ok = None
-                log.warning("能力校验未通过：%s", payload.problem)
+                return
+
+            self._capabilities_ok = None
+            log.warning("能力校验未通过：%s", payload.problem)
+            # Preserve INVALID/EMPTY messages during a manual reconnect. A
+            # complete card still needs to surface configuration problems.
+            if not connection_only or self.card.is_complete():
                 self._set_state(State.ERROR, f"⚠ {payload.problem}")
 
         self._executor(job, done)

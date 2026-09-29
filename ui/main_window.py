@@ -320,6 +320,20 @@ class ConnectionPopover(QWidget):
 
         status_layout.addWidget(text_box, 1)
         panel_layout.addWidget(status_row)
+
+        divider = QFrame(panel)
+        divider.setObjectName("divider")
+        divider.setFixedHeight(1)
+        panel_layout.addSpacing(12)
+        panel_layout.addWidget(divider)
+        panel_layout.addSpacing(8)
+
+        self.reconnect_button = QPushButton("重新连接", panel)
+        self.reconnect_button.setObjectName("connectionActionButton")
+        self.reconnect_button.setFont(fonts["button"])
+        self.reconnect_button.setFixedHeight(36)
+        panel_layout.addWidget(self.reconnect_button)
+
         root.addWidget(panel)
 
         self._caret = QLabel(self)
@@ -340,11 +354,24 @@ class ConnectionPopover(QWidget):
         self.status_dot.set_level(level)
         if level == "ok":
             detail = "已通过 AnkiConnect 建立连接"
+            action_text = "重新检测连接"
+            action_enabled = True
         elif level == "warn":
-            detail = "未检测到 AnkiConnect"
+            detail = (
+                "AnkiConnect 响应异常，请重新检测"
+                if "异常" in text
+                else "未检测到 AnkiConnect"
+            )
+            action_text = "重新连接"
+            action_enabled = True
         else:
             detail = "正在检测 AnkiConnect…"
+            action_text = "正在检测…"
+            action_enabled = False
+
         self.status_detail.setText(detail)
+        self.reconnect_button.setText(action_text)
+        self.reconnect_button.setEnabled(action_enabled)
 
     def show_anchored(self, anchor: QWidget) -> None:
         self.adjustSize()
@@ -668,7 +695,9 @@ class MainWindow(QMainWindow):
         return row
 
     def _build_connection_popover(self) -> ConnectionPopover:
-        return ConnectionPopover(self, self.fonts, self._bundle_dir)
+        popover = ConnectionPopover(self, self.fonts, self._bundle_dir)
+        popover.reconnect_button.clicked.connect(self.controller.retry_connection)
+        return popover
 
     def _build_prompt_popover(self) -> PromptPopover:
         popover = PromptPopover(self, self.fonts, self.format_prompt)

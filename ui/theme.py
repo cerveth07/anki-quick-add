@@ -293,6 +293,26 @@ QLabel#connectionDetail {{
     color: {MUTED};
 }}
 
+
+QPushButton#connectionActionButton {{
+    color: {TEXT};
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    padding: 0px 8px;
+    text-align: left;
+}}
+QPushButton#connectionActionButton:hover {{
+    background: #F5F6F8;
+}}
+QPushButton#connectionActionButton:pressed {{
+    background: #ECEEF2;
+}}
+QPushButton#connectionActionButton:disabled {{
+    color: {DISABLED_TEXT};
+    background: transparent;
+}}
+
 QFrame#pasteSurface, QFrame#deckSurface {{
     background: {SURFACE};
     border: 1px solid {BORDER};
