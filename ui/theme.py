@@ -40,10 +40,11 @@ SELECTION_BG = "#DDE8FF"
 SCROLLBAR = "#C4C4C4"
 SCROLLBAR_HOVER = "#A8A8A8"
 OK = "#36A86B"
+OFFLINE_DOT = "#A5A29D"
 WARN = "#F05C48"
 CONNECTING = "#E49A32"
 CONNECTED_BG = "#EDF8F1"
-DISCONNECTED_BG = "#FFF1EE"
+DISCONNECTED_BG = "#F2F1EE"
 CONNECTING_BG = "#FFF6E8"
 FRONT_ACCENT = "#4678F5"
 BACK_ACCENT = "#49C7BE"
@@ -241,7 +242,7 @@ QFrame#statusBadge[level="info"] {{
     border-color: {CONNECTING_BG};
 }}
 QFrame#statusDot {{
-    background: {WARN};
+    background: {OFFLINE_DOT};
     border: none;
     border-radius: {STATUS_BADGE_DOT_SIZE // 2}px;
 }}
@@ -250,6 +251,46 @@ QFrame#statusDot[level="ok"] {{
 }}
 QFrame#statusDot[level="info"] {{
     background: {CONNECTING};
+}}
+
+
+QPushButton#connectionButton {{
+    color: {TEXT};
+    background: {DISCONNECTED_BG};
+    border: 1px solid {DISCONNECTED_BG};
+    border-radius: {STATUS_BADGE_HEIGHT // 2}px;
+    min-height: {STATUS_BADGE_HEIGHT}px;
+    max-height: {STATUS_BADGE_HEIGHT}px;
+    padding: 0px;
+}}
+QPushButton#connectionButton[level="ok"] {{
+    background: {CONNECTED_BG};
+    border-color: {CONNECTED_BG};
+}}
+QPushButton#connectionButton[level="info"] {{
+    background: {CONNECTING_BG};
+    border-color: {CONNECTING_BG};
+}}
+QPushButton#connectionButton:hover {{
+    border-color: {BORDER};
+}}
+QPushButton#connectionButton:pressed {{
+    border-color: {FOCUS};
+}}
+QLabel#connectionButtonText {{
+    color: {TEXT};
+}}
+QWidget#connectionPopover {{
+    background: transparent;
+    color: {TEXT};
+}}
+QFrame#connectionSurface {{
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: {PANEL_RADIUS}px;
+}}
+QLabel#connectionDetail {{
+    color: {MUTED};
 }}
 
 QFrame#pasteSurface, QFrame#deckSurface {{

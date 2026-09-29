@@ -49,15 +49,12 @@ from ui.theme import (
     PREVIEW_PAD_Y,
     PROMPT_POPOVER_HEIGHT,
     PROMPT_POPOVER_WIDTH,
-    STATUS_BADGE_DOT_GAP,
-    STATUS_BADGE_DOT_SIZE,
     STATUS_BADGE_HEIGHT,
-    STATUS_BADGE_PAD_X,
     TEXT,
     WARN,
     load_fonts,
 )
-from ui.widgets import FocusSurface, PromptButton, ReplacePasteTextEdit, StatusDot
+from ui.widgets import ConnectionButton, FocusSurface, PromptButton, ReplacePasteTextEdit, StatusDot
 
 log = logging.getLogger("aqa")
 
@@ -266,6 +263,143 @@ class PromptPopover(QWidget):
             callback(False)
 
 
+class ConnectionPopover(QWidget):
+    """Small anchored popup that explains the current Anki connection state."""
+
+    def __init__(self, parent: QWidget, fonts, bundle_dir: str):
+        super().__init__(
+            parent,
+            Qt.WindowType.Popup
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint,
+        )
+        self.setObjectName("connectionPopover")
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setFixedWidth(318)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 10, 12, 16)
+        root.setSpacing(0)
+
+        panel = QFrame(self)
+        panel.setObjectName("connectionSurface")
+        shadow = QGraphicsDropShadowEffect(panel)
+        shadow.setBlurRadius(20)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(32, 36, 44, 20))
+        panel.setGraphicsEffect(shadow)
+        self._shadow = shadow
+
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(16, 14, 16, 14)
+        panel_layout.setSpacing(0)
+
+        status_row = QWidget(panel)
+        status_layout = QHBoxLayout(status_row)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(10)
+
+        self.status_dot = StatusDot(status_row)
+        status_layout.addWidget(self.status_dot, 0, Qt.AlignmentFlag.AlignTop)
+
+        text_box = QWidget(status_row)
+        text_layout = QVBoxLayout(text_box)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(3)
+
+        self.status_title = QLabel("Anki 连接中…", text_box)
+        self.status_title.setFont(fonts["cn_medium"])
+        text_layout.addWidget(self.status_title)
+
+        self.status_detail = QLabel("正在检测 AnkiConnect…", text_box)
+        self.status_detail.setObjectName("connectionDetail")
+        self.status_detail.setFont(fonts["small"])
+        self.status_detail.setWordWrap(True)
+        text_layout.addWidget(self.status_detail)
+
+        status_layout.addWidget(text_box, 1)
+        panel_layout.addWidget(status_row)
+        root.addWidget(panel)
+
+        self._caret = QLabel(self)
+        self._caret.setObjectName("connectionCaret")
+        self._caret.setFixedSize(QSize(18, 10))
+        self._caret.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        caret_icon = QIcon(os.path.join(bundle_dir, "ui", "icons", "popover-caret.svg"))
+        if not caret_icon.isNull():
+            self._caret.setPixmap(caret_icon.pixmap(QSize(18, 10)))
+        else:
+            self._caret.hide()
+
+        self.set_connection("Anki 连接中…", "info")
+
+    def set_connection(self, text: str, level: str) -> None:
+        level = level if level in {"ok", "warn", "info"} else "info"
+        self.status_title.setText(text)
+        self.status_dot.set_level(level)
+        if level == "ok":
+            detail = "已通过 AnkiConnect 建立连接"
+        elif level == "warn":
+            detail = "未检测到 AnkiConnect"
+        else:
+            detail = "正在检测 AnkiConnect…"
+        self.status_detail.setText(detail)
+
+    def show_anchored(self, anchor: QWidget) -> None:
+        self.adjustSize()
+        top_left = anchor.mapToGlobal(QPoint(0, 0))
+        bottom_right = anchor.mapToGlobal(QPoint(anchor.width(), anchor.height()))
+        screen = QApplication.screenAt(bottom_right) or QApplication.primaryScreen()
+
+        x = top_left.x()
+        y = bottom_right.y() + 8
+        if screen is not None:
+            available = screen.availableGeometry()
+            if x + self.width() > available.right() + 1:
+                x = available.right() - self.width() + 1 - 8
+            if y + self.height() > available.bottom() + 1:
+                y = top_left.y() - self.height() - 8
+            x = max(available.left() + 8, x)
+            y = max(available.top() + 8, y)
+
+        self.move(x, y)
+        self.show()
+        self.raise_()
+
+        shown_below = self.y() >= bottom_right.y()
+        pixmap = self._caret.pixmap()
+        if shown_below and pixmap is not None and not pixmap.isNull():
+            anchor_center_x = top_left.x() + anchor.width() // 2
+            local_center_x = anchor_center_x - self.x()
+            caret_x = max(
+                18,
+                min(
+                    local_center_x - self._caret.width() // 2,
+                    self.width() - self._caret.width() - 18,
+                ),
+            )
+            self._caret.move(caret_x, 1)
+            self._caret.show()
+            self._caret.raise_()
+        else:
+            self._caret.hide()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        parent = self.parentWidget()
+        callback = getattr(parent, "_set_connection_open_state", None)
+        if callback is not None:
+            callback(True)
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        parent = self.parentWidget()
+        callback = getattr(parent, "_set_connection_open_state", None)
+        if callback is not None:
+            callback(False)
+
+
 class MainWindow(QMainWindow):
     """Qt view implementing the controller's small view protocol."""
 
@@ -327,6 +461,7 @@ class MainWindow(QMainWindow):
         self.outer_layout = outer
 
         self._build_connection_badge(outer)
+        self.connection_popover = self._build_connection_popover()
 
         outer.addSpacing(GAP_STATUS_TO_HEADER)
         header = QWidget(root)
@@ -447,20 +582,17 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self.focus_paste)
 
     def _build_connection_badge(self, outer: QVBoxLayout) -> None:
-        self.connection_badge = QFrame()
-        self.connection_badge.setObjectName("statusBadge")
-        self.connection_badge.setFixedHeight(STATUS_BADGE_HEIGHT)
-        self.connection_badge.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        badge_layout = QHBoxLayout(self.connection_badge)
-        badge_layout.setContentsMargins(STATUS_BADGE_PAD_X, 1, STATUS_BADGE_PAD_X, 1)
-        badge_layout.setSpacing(STATUS_BADGE_DOT_GAP)
-        self.connection_dot = StatusDot(self.connection_badge)
-        self.connection_dot.setFixedSize(STATUS_BADGE_DOT_SIZE, STATUS_BADGE_DOT_SIZE)
-        badge_layout.addWidget(self.connection_dot, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.connection_label = QLabel("Anki 连接中…", self.connection_badge)
-        self.connection_label.setFont(self.fonts["cn"])
-        badge_layout.addWidget(self.connection_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        outer.addWidget(self.connection_badge, 0, Qt.AlignmentFlag.AlignLeft)
+        icon_dir = os.path.join(self._bundle_dir, "ui", "icons")
+        self.connection_button = ConnectionButton(
+            self.fonts["cn"],
+            os.path.join(icon_dir, "chevron-down-muted.svg"),
+            os.path.join(icon_dir, "chevron-up.svg"),
+            self,
+        )
+        self.connection_button.setFixedHeight(STATUS_BADGE_HEIGHT)
+        self.connection_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.connection_button.clicked.connect(self.toggle_connection)
+        outer.addWidget(self.connection_button, 0, Qt.AlignmentFlag.AlignLeft)
 
     def _build_action_row(self, outer: QVBoxLayout, parent: QWidget) -> None:
         action = QWidget(parent)
@@ -534,6 +666,9 @@ class MainWindow(QMainWindow):
         label.setFont(self.fonts["section"])
         layout.addWidget(label, 1, Qt.AlignmentFlag.AlignVCenter)
         return row
+
+    def _build_connection_popover(self) -> ConnectionPopover:
+        return ConnectionPopover(self, self.fonts, self._bundle_dir)
 
     def _build_prompt_popover(self) -> PromptPopover:
         popover = PromptPopover(self, self.fonts, self.format_prompt)
@@ -614,10 +749,26 @@ class MainWindow(QMainWindow):
     def _set_prompt_open_state(self, opened: bool) -> None:
         self.format_button.set_open(opened)
 
+    def _set_connection_open_state(self, opened: bool) -> None:
+        self.connection_button.set_open(opened)
+
+    def toggle_connection(self) -> None:
+        if self.connection_popover.isVisible():
+            self.connection_popover.hide()
+            return
+        if self.prompt_popover.isVisible():
+            self.prompt_popover.hide()
+        self.show_connection_popover()
+
+    def show_connection_popover(self) -> None:
+        self.connection_popover.show_anchored(self.connection_button)
+
     def toggle_format(self) -> None:
         if self.prompt_popover.isVisible():
             self.prompt_popover.hide()
         else:
+            if self.connection_popover.isVisible():
+                self.connection_popover.hide()
             self.show_prompt_popover()
 
     def show_prompt_popover(self) -> None:
@@ -663,13 +814,9 @@ class MainWindow(QMainWindow):
 
     def set_connection(self, text: str, level: str = "info") -> None:
         level = level if level in {"ok", "warn", "info"} else "info"
-        self.connection_label.setText(text)
-        self.connection_badge.setProperty("level", level)
-        self.connection_dot.set_level(level)
-        style = self.connection_badge.style()
-        style.unpolish(self.connection_badge)
-        style.polish(self.connection_badge)
-        self.connection_badge.adjustSize()
+        self.connection_button.set_connection(text, level)
+        if hasattr(self, "connection_popover"):
+            self.connection_popover.set_connection(text, level)
 
     def set_card(self, front: str, back: str, hint: str = "") -> None:
         self._set_text(self.front_box, front, self.fonts["front"] if CJK_RE.search(front) else self.fonts["latin"])
