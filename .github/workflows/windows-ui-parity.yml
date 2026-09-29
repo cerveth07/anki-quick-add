@@ -3,7 +3,7 @@ name: Windows UI Parity
 on:
   workflow_dispatch:
   push:
-    branches: [main, "design/ui-color-refresh-v2"]
+    branches: [main]
     paths:
       - "*.py"
       - "ui/**"
