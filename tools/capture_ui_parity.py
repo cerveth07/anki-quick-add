@@ -96,6 +96,15 @@ def main() -> int:
     capture(window, out / "05-acceptance.png")
     window.prompt_popover.hide()
 
+    window.set_connection("Anki 未连接", "warn")
+    app.processEvents()
+    capture(window, out / "06-connection-disconnected.png")
+
+    window.show_connection_popover()
+    app.processEvents()
+    capture(window, out / "07-connection-popover.png")
+    window.connection_popover.hide()
+
     print(f"Captured UI parity screenshots to: {out}")
     QTimer.singleShot(0, app.quit)
     return app.exec()

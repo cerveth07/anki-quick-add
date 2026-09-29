@@ -3,7 +3,7 @@ name: Windows UI Parity
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, "feature/anki-connection-controls"]
     paths:
       - "*.py"
       - "ui/**"
@@ -109,7 +109,9 @@ jobs:
             "02-paste-focus.png",
             "03-preview-focus.png",
             "04-prompt-popover.png",
-            "05-acceptance.png"
+            "05-acceptance.png",
+            "06-connection-disconnected.png",
+            "07-connection-popover.png"
           )
           foreach ($name in $expected) {
             $path = Join-Path $dir $name
