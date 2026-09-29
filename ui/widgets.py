@@ -169,6 +169,17 @@ class ConnectionButton(QPushButton):
         self.set_open(False)
         self.set_connection("Anki 连接中…", "info")
 
+    def sizeHint(self) -> QSize:
+        layout = self.layout()
+        if layout is None:
+            return super().sizeHint()
+        hint = layout.sizeHint()
+        hint.setHeight(max(hint.height(), super().sizeHint().height()))
+        return hint
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
     def set_connection(self, text: str, level: str) -> None:
         level = level if level in {"ok", "warn", "info"} else "info"
         self.label.setText(text)

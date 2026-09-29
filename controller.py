@@ -264,6 +264,7 @@ class QuickAddController:
 
         self._connection_gen += 1
         request_connection_gen = self._connection_gen
+        request_card_gen = self._gen
         request_deck = self.deck
         self.view.set_connection("Anki 连接中…", "info")
         if not connection_only:
@@ -281,6 +282,7 @@ class QuickAddController:
             if (
                 request_connection_gen != self._connection_gen
                 or request_deck != self.deck
+                or (not connection_only and request_card_gen != self._gen)
             ):
                 log.debug("丢弃过期能力校验结果：deck=%s", request_deck)
                 return
