@@ -126,3 +126,76 @@ class StatusDot(QFrame):
         style.unpolish(self)
         style.polish(self)
         self.update()
+
+class ConnectionButton(QPushButton):
+    """Clickable Anki connection status control with dot, label and chevron."""
+
+    def __init__(
+        self,
+        font: QFont,
+        chevron_down_path: str,
+        chevron_up_path: str,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.setObjectName("connectionButton")
+        self.setText("")
+        self.setAccessibleName("Anki 连接状态")
+        self._down_icon = QIcon(chevron_down_path)
+        self._up_icon = QIcon(chevron_up_path)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(13, 0, 9, 0)
+        layout.setSpacing(8)
+        layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        self.dot = StatusDot(self)
+        self.dot.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self.dot, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self.label = QLabel("Anki 连接中…", self)
+        self.label.setObjectName("connectionButtonText")
+        self.label.setFont(font)
+        self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self.label, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self._chevron = QLabel(self)
+        self._chevron.setObjectName("connectionButtonChevron")
+        self._chevron.setFixedSize(10, 10)
+        self._chevron.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._chevron.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self._chevron, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self.set_open(False)
+        self.set_connection("Anki 连接中…", "info")
+
+    def sizeHint(self) -> QSize:
+        layout = self.layout()
+        if layout is None:
+            return super().sizeHint()
+        hint = layout.sizeHint()
+        hint.setHeight(max(hint.height(), super().sizeHint().height()))
+        return hint
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
+    def set_connection(self, text: str, level: str) -> None:
+        level = level if level in {"ok", "warn", "info"} else "info"
+        self.label.setText(text)
+        self.setAccessibleName(text)
+        self.setProperty("level", level)
+        self.dot.set_level(level)
+        style = self.style()
+        style.unpolish(self)
+        style.polish(self)
+        self.adjustSize()
+        self.update()
+
+    def set_open(self, opened: bool) -> None:
+        icon = self._up_icon if opened else self._down_icon
+        if icon.isNull():
+            self._chevron.clear()
+        else:
+            self._chevron.setPixmap(icon.pixmap(QSize(10, 10)))
+

@@ -15,17 +15,17 @@ from PySide6.QtGui import QFont, QFontDatabase, QFontInfo
 log = logging.getLogger("aqa")
 
 # Palette -----------------------------------------------------------------
-BG = "#F7F8FA"
+BG = "#F5F5F7"
 SURFACE = "#FFFFFF"
 INPUT_BG = "#FFFFFF"
-CODE_BG = "#F8FAFE"
-BORDER = "#DCE1E8"
-PANEL_SHADOW = "#E6E9EE"
-DIVIDER = "#E8EBF0"
-TEXT = "#20242C"
-MUTED = "#717784"
-FAINT = "#969DAA"
-PLACEHOLDER = "#969DAA"
+CODE_BG = "#F8F9FB"
+BORDER = "#E1E3E8"
+PANEL_SHADOW = "#E5E7EB"
+DIVIDER = "#ECEEF2"
+TEXT = "#1F2328"
+MUTED = "#6B7280"
+FAINT = "#9AA1AB"
+PLACEHOLDER = "#9AA1AB"
 PRIMARY = "#3F73E8"
 PRIMARY_HOVER = "#3567D6"
 PRIMARY_PRESSED = "#2E5BC2"
@@ -34,21 +34,26 @@ ADD_BUTTON = "#4F8FF7"
 ADD_BUTTON_HOVER = "#3F82EE"
 ADD_BUTTON_PRESSED = "#3476DC"
 NEUTRAL_BG = "#FFFFFF"
-DISABLED_BG = "#DDE2EA"
-DISABLED_TEXT = "#8A919E"
-SELECTION_BG = "#DDE8FF"
-SCROLLBAR = "#C4C4C4"
-SCROLLBAR_HOVER = "#A8A8A8"
+DISABLED_BG = "#E3E6EB"
+DISABLED_TEXT = "#8D949E"
+SELECTION_BG = "#E1E9FF"
+SCROLLBAR = "#C6CAD0"
+SCROLLBAR_HOVER = "#ABB0B7"
 OK = "#36A86B"
+OFFLINE_DOT = "#A5A29D"
 WARN = "#F05C48"
 CONNECTING = "#E49A32"
 CONNECTED_BG = "#EDF8F1"
-DISCONNECTED_BG = "#FFF1EE"
+DISCONNECTED_BG = "#F1F2F4"
 CONNECTING_BG = "#FFF6E8"
-FRONT_ACCENT = "#4678F5"
-BACK_ACCENT = "#49C7BE"
+FRONT_ACCENT = "#FF7FA0"
+BACK_ACCENT = "#786FE8"
 FORMAT_SURFACE = "#FFFFFF"
 FOCUS = "#7598EA"
+PROMPT_ACCENT = "#4F8FF7"
+PROMPT_BG_HOVER = "#F5F8FF"
+PROMPT_BG_PRESSED = "#ECF3FF"
+PROMPT_BORDER = "#CFE0FA"
 
 # Layout ------------------------------------------------------------------
 PAGE_SIDE = 30
@@ -216,7 +221,7 @@ QLabel#sectionTitle {{
     color: {TEXT};
 }}
 QLabel#promptButtonText {{
-    color: {PRIMARY};
+    color: {PROMPT_ACCENT};
     background: transparent;
     border: none;
 }}
@@ -241,7 +246,7 @@ QFrame#statusBadge[level="info"] {{
     border-color: {CONNECTING_BG};
 }}
 QFrame#statusDot {{
-    background: {WARN};
+    background: {OFFLINE_DOT};
     border: none;
     border-radius: {STATUS_BADGE_DOT_SIZE // 2}px;
 }}
@@ -250,6 +255,90 @@ QFrame#statusDot[level="ok"] {{
 }}
 QFrame#statusDot[level="info"] {{
     background: {CONNECTING};
+}}
+
+
+QPushButton#connectionButton {{
+    color: {TEXT};
+    background: {DISCONNECTED_BG};
+    border: 1px solid {DISCONNECTED_BG};
+    border-radius: {STATUS_BADGE_HEIGHT // 2}px;
+    min-height: {STATUS_BADGE_HEIGHT}px;
+    max-height: {STATUS_BADGE_HEIGHT}px;
+    padding: 0px;
+}}
+QPushButton#connectionButton[level="ok"] {{
+    background: {CONNECTED_BG};
+    border-color: {CONNECTED_BG};
+}}
+QPushButton#connectionButton[level="info"] {{
+    background: {CONNECTING_BG};
+    border-color: {CONNECTING_BG};
+}}
+QPushButton#connectionButton:hover {{
+    border-color: {BORDER};
+}}
+QPushButton#connectionButton:pressed {{
+    border-color: {FOCUS};
+}}
+QLabel#connectionButtonText {{
+    color: {TEXT};
+}}
+QWidget#connectionPopover {{
+    background: transparent;
+    color: {TEXT};
+}}
+QFrame#connectionSurface {{
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: {PANEL_RADIUS}px;
+}}
+QLabel#connectionDetail {{
+    color: {MUTED};
+}}
+
+
+QPushButton#connectionPrimaryButton,
+QPushButton#connectionSecondaryButton {{
+    border-radius: 7px;
+    padding: 0px 12px;
+    text-align: left;
+}}
+QPushButton#connectionPrimaryButton {{
+    color: {PRIMARY};
+    background: #F3F6FC;
+    border: 1px solid #D9E2F3;
+}}
+QPushButton#connectionPrimaryButton:hover {{
+    background: #EAF0FA;
+    border-color: #C5D4EC;
+}}
+QPushButton#connectionPrimaryButton:pressed {{
+    background: #DFE8F6;
+    border-color: #B5C7E4;
+}}
+QPushButton#connectionPrimaryButton:disabled {{
+    color: {DISABLED_TEXT};
+    background: #F6F7F9;
+    border-color: {BORDER};
+}}
+QPushButton#connectionSecondaryButton {{
+    color: {TEXT};
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+}}
+QPushButton#connectionSecondaryButton:hover {{
+    background: #F7F8FA;
+    border-color: #C9CFD8;
+}}
+QPushButton#connectionSecondaryButton:pressed {{
+    background: #EFF1F4;
+    border-color: #BCC3CD;
+}}
+QPushButton#connectionSecondaryButton:disabled {{
+    color: {DISABLED_TEXT};
+    background: #F8F8F8;
+    border-color: {BORDER};
 }}
 
 QFrame#pasteSurface, QFrame#deckSurface {{
@@ -356,19 +445,20 @@ QPushButton:disabled {{
     border-color: {DISABLED_BG};
 }}
 QPushButton#promptButton {{
-    color: {PRIMARY};
+    color: {PROMPT_ACCENT};
     background: {SURFACE};
-    border-color: #D5DFF4;
+    border-color: {PROMPT_BORDER};
     padding: 0px;
     min-height: 40px;
     max-height: 40px;
 }}
 QPushButton#promptButton:hover {{
-    background: #F5F8FE;
-    border-color: #B8C9EF;
+    background: {PROMPT_BG_HOVER};
+    border-color: #B8D0F5;
 }}
 QPushButton#promptButton:pressed {{
-    background: #EAF0FD;
+    background: {PROMPT_BG_PRESSED};
+    border-color: #9FC0EF;
 }}
 QPushButton#primaryButton {{
     color: {PRIMARY_TEXT};

@@ -20,6 +20,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QFileDialog,
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
@@ -32,6 +33,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from anki_launcher import (
+    AnkiLaunchError,
+    find_anki_executable,
+    is_valid_anki_executable,
+    launch_anki,
+)
 from controller import QuickAddController, short_deck
 from ui.qt_executor import QtThreadedExecutor
 from ui.theme import (
@@ -49,15 +56,12 @@ from ui.theme import (
     PREVIEW_PAD_Y,
     PROMPT_POPOVER_HEIGHT,
     PROMPT_POPOVER_WIDTH,
-    STATUS_BADGE_DOT_GAP,
-    STATUS_BADGE_DOT_SIZE,
     STATUS_BADGE_HEIGHT,
-    STATUS_BADGE_PAD_X,
     TEXT,
     WARN,
     load_fonts,
 )
-from ui.widgets import FocusSurface, PromptButton, ReplacePasteTextEdit, StatusDot
+from ui.widgets import ConnectionButton, FocusSurface, PromptButton, ReplacePasteTextEdit, StatusDot
 
 log = logging.getLogger("aqa")
 
@@ -266,6 +270,198 @@ class PromptPopover(QWidget):
             callback(False)
 
 
+class ConnectionPopover(QWidget):
+    """Small anchored popup that explains the current Anki connection state."""
+
+    def __init__(self, parent: QWidget, fonts, bundle_dir: str):
+        super().__init__(
+            parent,
+            Qt.WindowType.Popup
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint,
+        )
+        self.setObjectName("connectionPopover")
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setFixedWidth(292)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 8, 10, 14)
+        root.setSpacing(0)
+
+        panel = QFrame(self)
+        panel.setObjectName("connectionSurface")
+        shadow = QGraphicsDropShadowEffect(panel)
+        shadow.setBlurRadius(20)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(32, 36, 44, 20))
+        panel.setGraphicsEffect(shadow)
+        self._shadow = shadow
+
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(15, 13, 15, 13)
+        panel_layout.setSpacing(0)
+
+        status_row = QWidget(panel)
+        status_layout = QHBoxLayout(status_row)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(10)
+
+        self.status_dot = StatusDot(status_row)
+        status_layout.addWidget(self.status_dot, 0, Qt.AlignmentFlag.AlignTop)
+
+        text_box = QWidget(status_row)
+        text_layout = QVBoxLayout(text_box)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(3)
+
+        self.status_title = QLabel("Anki 连接中…", text_box)
+        title_font = QFont(fonts["button"])
+        title_font.setWeight(QFont.Weight.Medium)
+        self.status_title.setFont(title_font)
+        text_layout.addWidget(self.status_title)
+
+        self.status_detail = QLabel("正在检测 AnkiConnect…", text_box)
+        self.status_detail.setObjectName("connectionDetail")
+        self.status_detail.setFont(fonts["small"])
+        self.status_detail.setWordWrap(True)
+        text_layout.addWidget(self.status_detail)
+
+        status_layout.addWidget(text_box, 1)
+        panel_layout.addWidget(status_row)
+
+        divider = QFrame(panel)
+        divider.setObjectName("divider")
+        divider.setFixedHeight(1)
+        panel_layout.addSpacing(12)
+        panel_layout.addWidget(divider)
+        panel_layout.addSpacing(8)
+
+        action_font = QFont(fonts["small"])
+        action_font.setWeight(QFont.Weight.Medium)
+
+        self.reconnect_button = QPushButton("↻  重新连接", panel)
+        self.reconnect_button.setObjectName("connectionPrimaryButton")
+        self.reconnect_button.setFont(action_font)
+        self.reconnect_button.setFixedHeight(36)
+        self.reconnect_button.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        panel_layout.addWidget(self.reconnect_button)
+        panel_layout.addSpacing(6)
+
+        self.open_anki_button = QPushButton("▶  打开 Anki", panel)
+        self.open_anki_button.setObjectName("connectionSecondaryButton")
+        self.open_anki_button.setFont(action_font)
+        self.open_anki_button.setFixedHeight(36)
+        self.open_anki_button.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        panel_layout.addWidget(self.open_anki_button)
+
+        root.addWidget(panel)
+
+        self._caret = QLabel(self)
+        self._caret.setObjectName("connectionCaret")
+        self._caret.setFixedSize(QSize(18, 10))
+        self._caret.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        caret_icon = QIcon(os.path.join(bundle_dir, "ui", "icons", "popover-caret.svg"))
+        if not caret_icon.isNull():
+            self._caret.setPixmap(caret_icon.pixmap(QSize(18, 10)))
+        else:
+            self._caret.hide()
+
+        self.set_connection("Anki 连接中…", "info")
+
+    def set_connection(self, text: str, level: str) -> None:
+        level = level if level in {"ok", "warn", "info"} else "info"
+        self.status_title.setText(text)
+        self.status_dot.set_level(level)
+        if level == "ok":
+            detail = "已通过 AnkiConnect 建立连接"
+            action_text = "↻  重新检测连接"
+            action_enabled = True
+            show_open_anki = False
+        elif level == "warn":
+            detail = (
+                "AnkiConnect 响应异常，请重新检测"
+                if "异常" in text
+                else "未检测到 AnkiConnect"
+            )
+            action_text = "↻  重新连接"
+            action_enabled = True
+            show_open_anki = True
+        else:
+            detail = (
+                "正在启动 Anki，稍后检测 AnkiConnect…"
+                if "启动" in text
+                else "正在检测 AnkiConnect…"
+            )
+            action_text = "↻  正在检测…"
+            action_enabled = False
+            show_open_anki = False
+
+        self.status_detail.setText(detail)
+        self.reconnect_button.setText(action_text)
+        self.reconnect_button.setEnabled(action_enabled)
+        self.open_anki_button.setVisible(show_open_anki)
+
+    def show_anchored(self, anchor: QWidget) -> None:
+        self.adjustSize()
+        top_left = anchor.mapToGlobal(QPoint(0, 0))
+        bottom_right = anchor.mapToGlobal(QPoint(anchor.width(), anchor.height()))
+        screen = QApplication.screenAt(bottom_right) or QApplication.primaryScreen()
+
+        x = top_left.x()
+        y = bottom_right.y() + 8
+        if screen is not None:
+            available = screen.availableGeometry()
+            if x + self.width() > available.right() + 1:
+                x = available.right() - self.width() + 1 - 8
+            if y + self.height() > available.bottom() + 1:
+                y = top_left.y() - self.height() - 8
+            x = max(available.left() + 8, x)
+            y = max(available.top() + 8, y)
+
+        self.move(x, y)
+        self.show()
+        self.raise_()
+
+        shown_below = self.y() >= bottom_right.y()
+        pixmap = self._caret.pixmap()
+        if shown_below and pixmap is not None and not pixmap.isNull():
+            anchor_center_x = top_left.x() + anchor.width() // 2
+            local_center_x = anchor_center_x - self.x()
+            caret_x = max(
+                18,
+                min(
+                    local_center_x - self._caret.width() // 2,
+                    self.width() - self._caret.width() - 18,
+                ),
+            )
+            self._caret.move(caret_x, 1)
+            self._caret.show()
+            self._caret.raise_()
+        else:
+            self._caret.hide()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        parent = self.parentWidget()
+        callback = getattr(parent, "_set_connection_open_state", None)
+        if callback is not None:
+            callback(True)
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        parent = self.parentWidget()
+        callback = getattr(parent, "_set_connection_open_state", None)
+        if callback is not None:
+            callback(False)
+
+
 class MainWindow(QMainWindow):
     """Qt view implementing the controller's small view protocol."""
 
@@ -275,6 +471,13 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         self._save_state = save_state
         self._state = state
+        saved_anki_executable = state.get("anki_executable")
+        self._anki_executable = (
+            saved_anki_executable.strip()
+            if isinstance(saved_anki_executable, str) and saved_anki_executable.strip()
+            else ""
+        )
+        self._anki_launch_pending = False
         self._bundle_dir = bundle_dir
         app_icon_path = os.path.join(bundle_dir, "assets", "anki-quick-add.ico")
         app_icon = QIcon(app_icon_path)
@@ -327,6 +530,7 @@ class MainWindow(QMainWindow):
         self.outer_layout = outer
 
         self._build_connection_badge(outer)
+        self.connection_popover = self._build_connection_popover()
 
         outer.addSpacing(GAP_STATUS_TO_HEADER)
         header = QWidget(root)
@@ -337,9 +541,9 @@ class MainWindow(QMainWindow):
         self.paste_title.setObjectName("sectionTitle")
         self.paste_title.setFont(self.fonts["cn_medium"])
         header_layout.addWidget(self.paste_title, 1, Qt.AlignmentFlag.AlignVCenter)
-        document_icon = os.path.join(self._bundle_dir, "ui", "icons", "document.svg")
-        chevron_down = os.path.join(self._bundle_dir, "ui", "icons", "chevron-down.svg")
-        chevron_up = os.path.join(self._bundle_dir, "ui", "icons", "chevron-up.svg")
+        document_icon = os.path.join(self._bundle_dir, "ui", "icons", "document-accent.svg")
+        chevron_down = os.path.join(self._bundle_dir, "ui", "icons", "chevron-down-accent.svg")
+        chevron_up = os.path.join(self._bundle_dir, "ui", "icons", "chevron-up-accent.svg")
         self.format_button = PromptButton(
             "制卡提示词", self.fonts["button"], document_icon, chevron_down, chevron_up, header
         )
@@ -447,20 +651,17 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self.focus_paste)
 
     def _build_connection_badge(self, outer: QVBoxLayout) -> None:
-        self.connection_badge = QFrame()
-        self.connection_badge.setObjectName("statusBadge")
-        self.connection_badge.setFixedHeight(STATUS_BADGE_HEIGHT)
-        self.connection_badge.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        badge_layout = QHBoxLayout(self.connection_badge)
-        badge_layout.setContentsMargins(STATUS_BADGE_PAD_X, 1, STATUS_BADGE_PAD_X, 1)
-        badge_layout.setSpacing(STATUS_BADGE_DOT_GAP)
-        self.connection_dot = StatusDot(self.connection_badge)
-        self.connection_dot.setFixedSize(STATUS_BADGE_DOT_SIZE, STATUS_BADGE_DOT_SIZE)
-        badge_layout.addWidget(self.connection_dot, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.connection_label = QLabel("Anki 连接中…", self.connection_badge)
-        self.connection_label.setFont(self.fonts["cn"])
-        badge_layout.addWidget(self.connection_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        outer.addWidget(self.connection_badge, 0, Qt.AlignmentFlag.AlignLeft)
+        icon_dir = os.path.join(self._bundle_dir, "ui", "icons")
+        self.connection_button = ConnectionButton(
+            self.fonts["cn"],
+            os.path.join(icon_dir, "chevron-down-muted.svg"),
+            os.path.join(icon_dir, "chevron-up.svg"),
+            self,
+        )
+        self.connection_button.setFixedHeight(STATUS_BADGE_HEIGHT)
+        self.connection_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.connection_button.clicked.connect(self.toggle_connection)
+        outer.addWidget(self.connection_button, 0, Qt.AlignmentFlag.AlignLeft)
 
     def _build_action_row(self, outer: QVBoxLayout, parent: QWidget) -> None:
         action = QWidget(parent)
@@ -534,6 +735,12 @@ class MainWindow(QMainWindow):
         label.setFont(self.fonts["section"])
         layout.addWidget(label, 1, Qt.AlignmentFlag.AlignVCenter)
         return row
+
+    def _build_connection_popover(self) -> ConnectionPopover:
+        popover = ConnectionPopover(self, self.fonts, self._bundle_dir)
+        popover.reconnect_button.clicked.connect(self.controller.retry_connection)
+        popover.open_anki_button.clicked.connect(self.open_anki)
+        return popover
 
     def _build_prompt_popover(self) -> PromptPopover:
         popover = PromptPopover(self, self.fonts, self.format_prompt)
@@ -614,14 +821,81 @@ class MainWindow(QMainWindow):
     def _set_prompt_open_state(self, opened: bool) -> None:
         self.format_button.set_open(opened)
 
+    def _set_connection_open_state(self, opened: bool) -> None:
+        self.connection_button.set_open(opened)
+
+    def toggle_connection(self) -> None:
+        if self.connection_popover.isVisible():
+            self.connection_popover.hide()
+            return
+        if self.prompt_popover.isVisible():
+            self.prompt_popover.hide()
+        self.show_connection_popover()
+
+    def show_connection_popover(self) -> None:
+        self.connection_popover.show_anchored(self.connection_button)
+
     def toggle_format(self) -> None:
         if self.prompt_popover.isVisible():
             self.prompt_popover.hide()
         else:
+            if self.connection_popover.isVisible():
+                self.connection_popover.hide()
             self.show_prompt_popover()
 
     def show_prompt_popover(self) -> None:
         self.prompt_popover.show_anchored(self.format_button)
+
+    def _choose_anki_executable(self) -> str | None:
+        start_dir = os.path.dirname(self._anki_executable) if self._anki_executable else ""
+        path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "选择 Anki 程序",
+            start_dir,
+            "Anki (anki.exe);;应用程序 (*.exe)",
+        )
+        if not path:
+            return None
+        if not is_valid_anki_executable(path):
+            self.set_status("⚠ 请选择 Anki 的 anki.exe", "warn")
+            return None
+        return path
+
+    def open_anki(self) -> None:
+        if self._anki_launch_pending:
+            return
+
+        path = find_anki_executable(self._anki_executable)
+        if path is None:
+            if self._anki_executable:
+                self._anki_executable = ""
+                self._save_state(anki_executable="")
+            path = self._choose_anki_executable()
+            if path is None:
+                return
+
+        if path != self._anki_executable:
+            self._anki_executable = path
+            self._save_state(anki_executable=path)
+
+        try:
+            launch_anki(path)
+        except AnkiLaunchError as exc:
+            self.set_status(f"⚠ 无法启动 Anki：{exc}", "warn")
+            return
+
+        self._anki_launch_pending = True
+        self.set_connection("正在启动 Anki…", "info")
+        if self.connection_popover.isVisible():
+            self.connection_popover.hide()
+
+        # Complete this explicit user action with one delayed probe. There is
+        # no background polling and no focus-triggered automatic reconnect.
+        QTimer.singleShot(3500, self._probe_after_anki_launch)
+
+    def _probe_after_anki_launch(self) -> None:
+        self._anki_launch_pending = False
+        self.controller.retry_connection()
 
     def _schedule_format_prompt_save(self) -> None:
         self._format_prompt_save_timer.start(500)
@@ -663,13 +937,9 @@ class MainWindow(QMainWindow):
 
     def set_connection(self, text: str, level: str = "info") -> None:
         level = level if level in {"ok", "warn", "info"} else "info"
-        self.connection_label.setText(text)
-        self.connection_badge.setProperty("level", level)
-        self.connection_dot.set_level(level)
-        style = self.connection_badge.style()
-        style.unpolish(self.connection_badge)
-        style.polish(self.connection_badge)
-        self.connection_badge.adjustSize()
+        self.connection_button.set_connection(text, level)
+        if hasattr(self, "connection_popover"):
+            self.connection_popover.set_connection(text, level)
 
     def set_card(self, front: str, back: str, hint: str = "") -> None:
         self._set_text(self.front_box, front, self.fonts["front"] if CJK_RE.search(front) else self.fonts["latin"])

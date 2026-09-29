@@ -108,6 +108,7 @@ def save_state(
     geometry: str | None = None,
     deck: str | None = None,
     format_prompt: str | None = None,
+    anki_executable: str | None = None,
 ) -> None:
     data = load_state()
     if geometry and _parse_geometry(geometry) is not None:
@@ -116,6 +117,11 @@ def save_state(
         data["deck"] = deck
     if format_prompt is not None:
         data["format_prompt"] = format_prompt
+    if anki_executable is not None:
+        if anki_executable:
+            data["anki_executable"] = anki_executable
+        else:
+            data.pop("anki_executable", None)
     try:
         with open(_state_path(), "w", encoding="utf-8") as handle:
             json.dump(data, handle, ensure_ascii=False)
