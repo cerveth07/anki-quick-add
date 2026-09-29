@@ -20,6 +20,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QFileDialog,
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
@@ -32,6 +33,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from anki_launcher import (
+    AnkiLaunchError,
+    find_anki_executable,
+    is_valid_anki_executable,
+    launch_anki,
+)
 from controller import QuickAddController, short_deck
 from ui.qt_executor import QtThreadedExecutor
 from ui.theme import (
@@ -334,6 +341,12 @@ class ConnectionPopover(QWidget):
         self.reconnect_button.setFixedHeight(36)
         panel_layout.addWidget(self.reconnect_button)
 
+        self.open_anki_button = QPushButton("打开 Anki", panel)
+        self.open_anki_button.setObjectName("connectionActionButton")
+        self.open_anki_button.setFont(fonts["button"])
+        self.open_anki_button.setFixedHeight(36)
+        panel_layout.addWidget(self.open_anki_button)
+
         root.addWidget(panel)
 
         self._caret = QLabel(self)
@@ -356,6 +369,7 @@ class ConnectionPopover(QWidget):
             detail = "已通过 AnkiConnect 建立连接"
             action_text = "重新检测连接"
             action_enabled = True
+            show_open_anki = False
         elif level == "warn":
             detail = (
                 "AnkiConnect 响应异常，请重新检测"
@@ -364,14 +378,21 @@ class ConnectionPopover(QWidget):
             )
             action_text = "重新连接"
             action_enabled = True
+            show_open_anki = True
         else:
-            detail = "正在检测 AnkiConnect…"
+            detail = (
+                "正在启动 Anki，稍后检测 AnkiConnect…"
+                if "启动" in text
+                else "正在检测 AnkiConnect…"
+            )
             action_text = "正在检测…"
             action_enabled = False
+            show_open_anki = False
 
         self.status_detail.setText(detail)
         self.reconnect_button.setText(action_text)
         self.reconnect_button.setEnabled(action_enabled)
+        self.open_anki_button.setVisible(show_open_anki)
 
     def show_anchored(self, anchor: QWidget) -> None:
         self.adjustSize()
@@ -436,6 +457,13 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         self._save_state = save_state
         self._state = state
+        saved_anki_executable = state.get("anki_executable")
+        self._anki_executable = (
+            saved_anki_executable.strip()
+            if isinstance(saved_anki_executable, str) and saved_anki_executable.strip()
+            else ""
+        )
+        self._anki_launch_pending = False
         self._bundle_dir = bundle_dir
         app_icon_path = os.path.join(bundle_dir, "assets", "anki-quick-add.ico")
         app_icon = QIcon(app_icon_path)
@@ -697,6 +725,7 @@ class MainWindow(QMainWindow):
     def _build_connection_popover(self) -> ConnectionPopover:
         popover = ConnectionPopover(self, self.fonts, self._bundle_dir)
         popover.reconnect_button.clicked.connect(self.controller.retry_connection)
+        popover.open_anki_button.clicked.connect(self.open_anki)
         return popover
 
     def _build_prompt_popover(self) -> PromptPopover:
@@ -802,6 +831,57 @@ class MainWindow(QMainWindow):
 
     def show_prompt_popover(self) -> None:
         self.prompt_popover.show_anchored(self.format_button)
+
+    def _choose_anki_executable(self) -> str | None:
+        start_dir = os.path.dirname(self._anki_executable) if self._anki_executable else ""
+        path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "选择 Anki 程序",
+            start_dir,
+            "Anki (anki.exe);;应用程序 (*.exe)",
+        )
+        if not path:
+            return None
+        if not is_valid_anki_executable(path):
+            self.set_status("⚠ 请选择 Anki 的 anki.exe", "warn")
+            return None
+        return path
+
+    def open_anki(self) -> None:
+        if self._anki_launch_pending:
+            return
+
+        path = find_anki_executable(self._anki_executable)
+        if path is None:
+            if self._anki_executable:
+                self._anki_executable = ""
+                self._save_state(anki_executable="")
+            path = self._choose_anki_executable()
+            if path is None:
+                return
+
+        if path != self._anki_executable:
+            self._anki_executable = path
+            self._save_state(anki_executable=path)
+
+        try:
+            launch_anki(path)
+        except AnkiLaunchError as exc:
+            self.set_status(f"⚠ 无法启动 Anki：{exc}", "warn")
+            return
+
+        self._anki_launch_pending = True
+        self.set_connection("正在启动 Anki…", "info")
+        if self.connection_popover.isVisible():
+            self.connection_popover.hide()
+
+        # Complete this explicit user action with one delayed probe. There is
+        # no background polling and no focus-triggered automatic reconnect.
+        QTimer.singleShot(3500, self._probe_after_anki_launch)
+
+    def _probe_after_anki_launch(self) -> None:
+        self._anki_launch_pending = False
+        self.controller.retry_connection()
 
     def _schedule_format_prompt_save(self) -> None:
         self._format_prompt_save_timer.start(500)
