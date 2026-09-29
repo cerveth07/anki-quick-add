@@ -3,7 +3,7 @@ name: Windows UI Parity
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, "feature/anki-connection-controls"]
     paths:
       - "*.py"
       - "ui/**"
