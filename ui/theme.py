@@ -15,17 +15,17 @@ from PySide6.QtGui import QFont, QFontDatabase, QFontInfo
 log = logging.getLogger("aqa")
 
 # Palette -----------------------------------------------------------------
-BG = "#F7F8FA"
+BG = "#F5F5F7"
 SURFACE = "#FFFFFF"
 INPUT_BG = "#FFFFFF"
-CODE_BG = "#F8FAFE"
-BORDER = "#DCE1E8"
-PANEL_SHADOW = "#E6E9EE"
-DIVIDER = "#E8EBF0"
-TEXT = "#20242C"
-MUTED = "#717784"
-FAINT = "#969DAA"
-PLACEHOLDER = "#969DAA"
+CODE_BG = "#F8F9FB"
+BORDER = "#E1E3E8"
+PANEL_SHADOW = "#E5E7EB"
+DIVIDER = "#ECEEF2"
+TEXT = "#1F2328"
+MUTED = "#6B7280"
+FAINT = "#9AA1AB"
+PLACEHOLDER = "#9AA1AB"
 PRIMARY = "#3F73E8"
 PRIMARY_HOVER = "#3567D6"
 PRIMARY_PRESSED = "#2E5BC2"
@@ -34,22 +34,26 @@ ADD_BUTTON = "#4F8FF7"
 ADD_BUTTON_HOVER = "#3F82EE"
 ADD_BUTTON_PRESSED = "#3476DC"
 NEUTRAL_BG = "#FFFFFF"
-DISABLED_BG = "#DDE2EA"
-DISABLED_TEXT = "#8A919E"
-SELECTION_BG = "#DDE8FF"
-SCROLLBAR = "#C4C4C4"
-SCROLLBAR_HOVER = "#A8A8A8"
+DISABLED_BG = "#E3E6EB"
+DISABLED_TEXT = "#8D949E"
+SELECTION_BG = "#E1E9FF"
+SCROLLBAR = "#C6CAD0"
+SCROLLBAR_HOVER = "#ABB0B7"
 OK = "#36A86B"
 OFFLINE_DOT = "#A5A29D"
 WARN = "#F05C48"
 CONNECTING = "#E49A32"
 CONNECTED_BG = "#EDF8F1"
-DISCONNECTED_BG = "#F2F1EE"
+DISCONNECTED_BG = "#F1F2F4"
 CONNECTING_BG = "#FFF6E8"
-FRONT_ACCENT = "#4678F5"
-BACK_ACCENT = "#49C7BE"
+FRONT_ACCENT = "#5B7CFA"
+BACK_ACCENT = "#D8894B"
 FORMAT_SURFACE = "#FFFFFF"
 FOCUS = "#7598EA"
+PROMPT_ACCENT = "#B86832"
+PROMPT_BG_HOVER = "#FFF7F1"
+PROMPT_BG_PRESSED = "#FFF0E5"
+PROMPT_BORDER = "#E8D5C7"
 
 # Layout ------------------------------------------------------------------
 PAGE_SIDE = 30
@@ -217,7 +221,7 @@ QLabel#sectionTitle {{
     color: {TEXT};
 }}
 QLabel#promptButtonText {{
-    color: {PRIMARY};
+    color: {PROMPT_ACCENT};
     background: transparent;
     border: none;
 }}
@@ -441,19 +445,20 @@ QPushButton:disabled {{
     border-color: {DISABLED_BG};
 }}
 QPushButton#promptButton {{
-    color: {PRIMARY};
+    color: {PROMPT_ACCENT};
     background: {SURFACE};
-    border-color: #D5DFF4;
+    border-color: {PROMPT_BORDER};
     padding: 0px;
     min-height: 40px;
     max-height: 40px;
 }}
 QPushButton#promptButton:hover {{
-    background: #F5F8FE;
-    border-color: #B8C9EF;
+    background: {PROMPT_BG_HOVER};
+    border-color: #D9B99F;
 }}
 QPushButton#promptButton:pressed {{
-    background: #EAF0FD;
+    background: {PROMPT_BG_PRESSED};
+    border-color: #CFA984;
 }}
 QPushButton#primaryButton {{
     color: {PRIMARY_TEXT};

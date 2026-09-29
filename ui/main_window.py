@@ -541,9 +541,9 @@ class MainWindow(QMainWindow):
         self.paste_title.setObjectName("sectionTitle")
         self.paste_title.setFont(self.fonts["cn_medium"])
         header_layout.addWidget(self.paste_title, 1, Qt.AlignmentFlag.AlignVCenter)
-        document_icon = os.path.join(self._bundle_dir, "ui", "icons", "document.svg")
-        chevron_down = os.path.join(self._bundle_dir, "ui", "icons", "chevron-down.svg")
-        chevron_up = os.path.join(self._bundle_dir, "ui", "icons", "chevron-up.svg")
+        document_icon = os.path.join(self._bundle_dir, "ui", "icons", "document-accent.svg")
+        chevron_down = os.path.join(self._bundle_dir, "ui", "icons", "chevron-down-accent.svg")
+        chevron_up = os.path.join(self._bundle_dir, "ui", "icons", "chevron-up-accent.svg")
         self.format_button = PromptButton(
             "制卡提示词", self.fonts["button"], document_icon, chevron_down, chevron_up, header
         )
