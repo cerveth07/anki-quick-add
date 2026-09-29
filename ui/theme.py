@@ -294,23 +294,47 @@ QLabel#connectionDetail {{
 }}
 
 
-QPushButton#connectionActionButton {{
-    color: {TEXT};
-    background: transparent;
-    border: none;
-    border-radius: 6px;
-    padding: 0px 8px;
+QPushButton#connectionPrimaryButton,
+QPushButton#connectionSecondaryButton {{
+    border-radius: 7px;
+    padding: 0px 12px;
     text-align: left;
 }}
-QPushButton#connectionActionButton:hover {{
-    background: #F5F6F8;
+QPushButton#connectionPrimaryButton {{
+    color: {PRIMARY};
+    background: #F3F6FC;
+    border: 1px solid #D9E2F3;
 }}
-QPushButton#connectionActionButton:pressed {{
-    background: #ECEEF2;
+QPushButton#connectionPrimaryButton:hover {{
+    background: #EAF0FA;
+    border-color: #C5D4EC;
 }}
-QPushButton#connectionActionButton:disabled {{
+QPushButton#connectionPrimaryButton:pressed {{
+    background: #DFE8F6;
+    border-color: #B5C7E4;
+}}
+QPushButton#connectionPrimaryButton:disabled {{
     color: {DISABLED_TEXT};
-    background: transparent;
+    background: #F6F7F9;
+    border-color: {BORDER};
+}}
+QPushButton#connectionSecondaryButton {{
+    color: {TEXT};
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+}}
+QPushButton#connectionSecondaryButton:hover {{
+    background: #F7F8FA;
+    border-color: #C9CFD8;
+}}
+QPushButton#connectionSecondaryButton:pressed {{
+    background: #EFF1F4;
+    border-color: #BCC3CD;
+}}
+QPushButton#connectionSecondaryButton:disabled {{
+    color: {DISABLED_TEXT};
+    background: #F8F8F8;
+    border-color: {BORDER};
 }}
 
 QFrame#pasteSurface, QFrame#deckSurface {{

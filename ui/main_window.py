@@ -283,10 +283,10 @@ class ConnectionPopover(QWidget):
         self.setObjectName("connectionPopover")
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setFixedWidth(318)
+        self.setFixedWidth(292)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(12, 10, 12, 16)
+        root.setContentsMargins(10, 8, 10, 14)
         root.setSpacing(0)
 
         panel = QFrame(self)
@@ -299,7 +299,7 @@ class ConnectionPopover(QWidget):
         self._shadow = shadow
 
         panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(16, 14, 16, 14)
+        panel_layout.setContentsMargins(15, 13, 15, 13)
         panel_layout.setSpacing(0)
 
         status_row = QWidget(panel)
@@ -316,7 +316,9 @@ class ConnectionPopover(QWidget):
         text_layout.setSpacing(3)
 
         self.status_title = QLabel("Anki 连接中…", text_box)
-        self.status_title.setFont(fonts["cn_medium"])
+        title_font = QFont(fonts["button"])
+        title_font.setWeight(QFont.Weight.Medium)
+        self.status_title.setFont(title_font)
         text_layout.addWidget(self.status_title)
 
         self.status_detail = QLabel("正在检测 AnkiConnect…", text_box)
@@ -335,16 +337,28 @@ class ConnectionPopover(QWidget):
         panel_layout.addWidget(divider)
         panel_layout.addSpacing(8)
 
-        self.reconnect_button = QPushButton("重新连接", panel)
-        self.reconnect_button.setObjectName("connectionActionButton")
-        self.reconnect_button.setFont(fonts["button"])
-        self.reconnect_button.setFixedHeight(36)
-        panel_layout.addWidget(self.reconnect_button)
+        action_font = QFont(fonts["small"])
+        action_font.setWeight(QFont.Weight.Medium)
 
-        self.open_anki_button = QPushButton("打开 Anki", panel)
-        self.open_anki_button.setObjectName("connectionActionButton")
-        self.open_anki_button.setFont(fonts["button"])
+        self.reconnect_button = QPushButton("↻  重新连接", panel)
+        self.reconnect_button.setObjectName("connectionPrimaryButton")
+        self.reconnect_button.setFont(action_font)
+        self.reconnect_button.setFixedHeight(36)
+        self.reconnect_button.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        panel_layout.addWidget(self.reconnect_button)
+        panel_layout.addSpacing(6)
+
+        self.open_anki_button = QPushButton("▶  打开 Anki", panel)
+        self.open_anki_button.setObjectName("connectionSecondaryButton")
+        self.open_anki_button.setFont(action_font)
         self.open_anki_button.setFixedHeight(36)
+        self.open_anki_button.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         panel_layout.addWidget(self.open_anki_button)
 
         root.addWidget(panel)
@@ -367,7 +381,7 @@ class ConnectionPopover(QWidget):
         self.status_dot.set_level(level)
         if level == "ok":
             detail = "已通过 AnkiConnect 建立连接"
-            action_text = "重新检测连接"
+            action_text = "↻  重新检测连接"
             action_enabled = True
             show_open_anki = False
         elif level == "warn":
@@ -376,7 +390,7 @@ class ConnectionPopover(QWidget):
                 if "异常" in text
                 else "未检测到 AnkiConnect"
             )
-            action_text = "重新连接"
+            action_text = "↻  重新连接"
             action_enabled = True
             show_open_anki = True
         else:
@@ -385,7 +399,7 @@ class ConnectionPopover(QWidget):
                 if "启动" in text
                 else "正在检测 AnkiConnect…"
             )
-            action_text = "正在检测…"
+            action_text = "↻  正在检测…"
             action_enabled = False
             show_open_anki = False
 
