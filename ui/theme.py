@@ -46,14 +46,14 @@ CONNECTING = "#E49A32"
 CONNECTED_BG = "#EDF8F1"
 DISCONNECTED_BG = "#F1F2F4"
 CONNECTING_BG = "#FFF6E8"
-FRONT_ACCENT = "#5B7CFA"
-BACK_ACCENT = "#D8894B"
+FRONT_ACCENT = "#F26B5B"
+BACK_ACCENT = "#786FE8"
 FORMAT_SURFACE = "#FFFFFF"
 FOCUS = "#7598EA"
-PROMPT_ACCENT = "#B86832"
-PROMPT_BG_HOVER = "#FFF7F1"
-PROMPT_BG_PRESSED = "#FFF0E5"
-PROMPT_BORDER = "#E8D5C7"
+PROMPT_ACCENT = "#4F8FF7"
+PROMPT_BG_HOVER = "#F5F8FF"
+PROMPT_BG_PRESSED = "#ECF3FF"
+PROMPT_BORDER = "#CFE0FA"
 
 # Layout ------------------------------------------------------------------
 PAGE_SIDE = 30
@@ -454,11 +454,11 @@ QPushButton#promptButton {{
 }}
 QPushButton#promptButton:hover {{
     background: {PROMPT_BG_HOVER};
-    border-color: #D9B99F;
+    border-color: #B8D0F5;
 }}
 QPushButton#promptButton:pressed {{
     background: {PROMPT_BG_PRESSED};
-    border-color: #CFA984;
+    border-color: #9FC0EF;
 }}
 QPushButton#primaryButton {{
     color: {PRIMARY_TEXT};
