@@ -5,7 +5,7 @@ from collections import deque
 from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, QPoint, QRectF, QSignalBlocker, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen
+from PySide6.QtGui import QActionGroup, QColor, QFont, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFrame, QGraphicsDropShadowEffect, QHBoxLayout,
     QLabel, QMenu, QPushButton, QTextEdit, QVBoxLayout, QWidget,
@@ -168,7 +168,7 @@ class FloatingPanel(QWidget):
         self.collapse_button.setFixedSize(28, 28)
         self.collapse_button.setToolTip("收起预览，继续监听")
         self.collapse_button.setAccessibleName("收起预览")
-        self.collapse_button.clicked.connect(self.hide)
+        self.collapse_button.clicked.connect(owner.collapse_preview)
         header.addWidget(self.collapse_button)
         layout.addLayout(header)
         self.queue_label = QLabel("复制词卡 JSON 即可识别")
@@ -253,10 +253,10 @@ class FloatingToast(QWidget):
         shadow(panel)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(14, 8, 14, 8)
-        title = QLabel("✓ 已添加到 Anki")
-        title.setFont(pixel_font(fonts["cn_medium"], 14))
-        title.setStyleSheet("color: #208347;")
-        layout.addWidget(title)
+        self.title = QLabel("✓ 已添加到 Anki")
+        self.title.setFont(pixel_font(fonts["cn_medium"], 14))
+        self.title.setStyleSheet("color: #208347;")
+        layout.addWidget(self.title)
         self.detail = QLabel()
         self.detail.setObjectName("floatMuted")
         self.detail.setFont(pixel_font(fonts["cn"], 12))
@@ -268,6 +268,7 @@ class FloatingToast(QWidget):
 class PendingCard:
     raw: str
     key: tuple[str, str]
+    automatic: bool = False
 
 
 class FloatingCapture(QObject):
@@ -285,6 +286,8 @@ class FloatingCapture(QObject):
         self._loading = False
         self._finishing = False
         self._submitted_title = ""
+        self.quick_add = main._state.get("floating_quick_add", True) is not False
+        self._action_scheduled = False
         self.orb = FloatingOrb()
         self.panel = FloatingPanel(self)
         self.toast = FloatingToast(main.fonts)
@@ -319,6 +322,7 @@ class FloatingCapture(QObject):
     def enable(self):
         if self.closed:
             return
+        self._baseline_clipboard()
         self.enabled = True
         self.main.prompt_popover.hide()
         self.main.connection_popover.hide()
@@ -326,11 +330,12 @@ class FloatingCapture(QObject):
         self.orb.show()
         self.poll_timer.start()
         self._load_next()
-        self.read_clipboard()
         self.sync()
 
     def open_main(self):
         self.enabled = False
+        if self.active:
+            self.active.automatic = False
         self.poll_timer.stop()
         self.success_timer.stop()
         self.orb.hide()
@@ -344,6 +349,24 @@ class FloatingCapture(QObject):
 
     def persist_position(self):
         self.main._save_state(floating_position=[self.orb.x(), self.orb.y()])
+
+    def _baseline_clipboard(self):
+        # Starting/resuming listening must not import stale clipboard contents.
+        self._last_text = self.clipboard.text()
+        try:
+            card = parse_card(self._last_text)
+            self._last_key = (card.front, card.back)
+        except CardError:
+            self._last_key = None
+
+    def set_quick_add(self, enabled):
+        self.quick_add = bool(enabled)
+        self.main._save_state(floating_quick_add=self.quick_add)
+        self.sync()
+
+    def collapse_preview(self):
+        self.panel.hide()
+        self.sync()
 
     def read_clipboard(self):
         if not self.enabled or self.closed:
@@ -362,12 +385,12 @@ class FloatingCapture(QObject):
         self._last_key = key
         if (self.active and key == self.active.key) or any(item.key == key for item in self.queue):
             return
-        self.queue.append(PendingCard(raw, key))
+        self.queue.append(PendingCard(raw, key, automatic=True))
         self._load_next()
         self.sync()
 
     def _load_next(self):
-        if not self.enabled or self.closed or self.active or self._finishing or self.success_timer.isActive():
+        if not self.enabled or self.closed or self.active or self._finishing:
             return
         ctl = self.main.controller
         if ctl.state is State.ADDING:
@@ -382,8 +405,6 @@ class FloatingCapture(QObject):
             self._loading = False
         if self.active:
             self.sync()
-            self.reposition()
-            self.panel.show()  # WA_ShowWithoutActivating: never steal the source app's focus.
 
     def sync(self):
         if self.closed:
@@ -415,11 +436,17 @@ class FloatingCapture(QObject):
         self.panel.retry_button.setEnabled(editing)
         self.panel.add_button.setEnabled(self.main.add_button.isEnabled())
         self.panel.add_button.setText("正在添加…" if not editing else "重试连接" if ctl.state in (State.ERROR, State.ANKI_OFFLINE) else "添加到 Anki")
-        self.panel.queue_label.setText(f"待添加 {self.pending_count} 张 · 可直接编辑" if self.pending_count else "复制词卡 JSON 即可识别")
+        mode = "快速添加" if self.quick_add else "确认后添加"
+        count = f"待处理 {self.pending_count} 张" if self.pending_count else "复制词卡 JSON 即可识别"
+        self.panel.queue_label.setText(f"{mode} · {count}")
         self.panel.status_label.setText(ctl.message or "")
         color = "#D35D45" if ctl.state in (State.ERROR, State.INVALID, State.DUPLICATE, State.ANKI_OFFLINE) else "#28834F" if ctl.state is State.READY else "#748095"
         self.panel.status_label.setStyleSheet(f"color: {color};")
         self.orb.count = self.pending_count
+        self.orb.setToolTip(
+            f"{mode} · 牌组：{ctl.deck}\n待处理 {self.pending_count} 张 · 点击查看 · 右键切换模式"
+            if self.enabled else "剪贴板监听已暂停 · 右键恢复"
+        )
         self.orb.update()
         if ctl.state is State.ADDING:
             self._submitted_title = ctl.card.front
@@ -430,6 +457,43 @@ class FloatingCapture(QObject):
             elif ctl.state is State.EMPTY:
                 self.active = None
                 QTimer.singleShot(0, self._load_next)
+            elif self.enabled and self.quick_add and self.active.automatic and not self.panel.isVisible():
+                if ctl.state in (State.ERROR, State.ANKI_OFFLINE, State.INVALID):
+                    # Leave failed cards for a deliberate retry, without a retry loop.
+                    self.active.automatic = False
+                    self._notify("⚠ 需要处理", ctl.message, warning=True)
+                elif ctl.state in (State.READY, State.DUPLICATE) and not self._action_scheduled:
+                    self._action_scheduled = True
+                    QTimer.singleShot(0, self._auto_action)
+
+    def _auto_action(self):
+        self._action_scheduled = False
+        if (self.closed or not self.enabled or not self.quick_add or self.panel.isVisible()
+                or not self.active or not self.active.automatic or self._finishing):
+            return
+        ctl = self.main.controller
+        if ctl.state is State.READY:
+            ctl.add_clicked()
+        elif ctl.state is State.DUPLICATE:
+            title = ctl.card.front
+            self._finishing = True
+            ctl.clear_clicked()
+            self.active = None
+            self._finishing = False
+            self._notify("已存在，已跳过", title)
+            self._load_next()
+            self.sync()
+
+    def _notify(self, title, detail, *, warning=False):
+        if not self.enabled or self.closed:
+            return
+        self.toast.title.setText(title)
+        self.toast.title.setStyleSheet(f"color: {'#D35D45' if warning else '#208347'};")
+        self.toast.detail.setText(self.toast.detail.fontMetrics().elidedText(detail, Qt.TextElideMode.ElideRight, 196))
+        self.toast.detail.setToolTip(detail)
+        self.reposition()
+        self.toast.show()
+        self.success_timer.start(2000)
 
     def _complete(self):
         if self.closed:
@@ -438,17 +502,14 @@ class FloatingCapture(QObject):
         self._finishing = False
         self.sync()
         if self.enabled:
-            self.panel.hide()
             detail = self._submitted_title + " · " + self.main.controller.deck
-            self.toast.detail.setText(self.toast.detail.fontMetrics().elidedText(detail, Qt.TextElideMode.ElideRight, 196))
-            self.toast.detail.setToolTip(detail)
-            self.reposition()
-            self.toast.show()
-            self.success_timer.start(2000)
+            self._notify("✓ 已添加到 Anki", detail)
+            self._load_next()
+            if not self.pending_count:
+                self.panel.hide()
 
     def _after_success(self):
         self.toast.hide()
-        self._load_next()
 
     def submit(self):
         self.main.controller.add_clicked()
@@ -458,15 +519,20 @@ class FloatingCapture(QObject):
             return
         self.active = None
         self.main.controller.clear_clicked()
-        self.panel.hide()
         self._load_next()
         self.sync()
+        if not self.pending_count:
+            self.panel.hide()
 
     def edit_front(self, text):
+        if self.active:
+            self.active.automatic = False
         self.main._set_text(self.main.front_box, text)
         self.main.controller.front_changed(text)
 
     def edit_back(self, text):
+        if self.active:
+            self.active.automatic = False
         self.main._set_text(self.main.back_box, text)
         self.main.controller.back_changed(text)
 
@@ -476,14 +542,15 @@ class FloatingCapture(QObject):
 
     def toggle_preview(self):
         if self.panel.isVisible():
-            self.panel.hide()
+            self.collapse_preview()
         else:
             self.success_timer.stop()
             self.toast.hide()
-            self._load_next()
-            self.sync()
+            # Show before loading, so opening a preview pauses any queued auto action.
             self.reposition()
             self.panel.show()
+            self._load_next()
+            self.sync()
 
     def reposition(self):
         screen = QApplication.screenAt(self.orb.geometry().center()) or self.orb.screen()
@@ -497,6 +564,16 @@ class FloatingCapture(QObject):
 
     def show_menu(self, point):
         menu = QMenu(self.orb)
+        deck = menu.addAction("目标牌组：" + self.main.controller.deck)
+        deck.setEnabled(False)
+        group = QActionGroup(menu)
+        for label, quick in (("快速添加", True), ("确认后添加", False)):
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(self.quick_add == quick)
+            group.addAction(action)
+            action.triggered.connect(lambda _checked, value=quick: self.set_quick_add(value))
+        menu.addSeparator()
         menu.addAction("打开主窗口", self.open_main)
         menu.addAction("暂停监听" if self.poll_timer.isActive() else "恢复监听", self.toggle_listening)
         menu.addSeparator()
@@ -507,15 +584,16 @@ class FloatingCapture(QObject):
         # Clipboard signal and timer obey the same pause state.
         self.enabled = not self.enabled
         if self.enabled:
+            self._baseline_clipboard()
             self.poll_timer.start()
-            self.read_clipboard()
             self._load_next()
-            self.orb.setToolTip("点击预览词卡 · 拖动移动 · 右键打开菜单")
         else:
             self.poll_timer.stop()
-            self.orb.setToolTip("剪贴板监听已暂停 · 右键恢复")
+        self.sync()
 
     def shutdown(self):
+        if self.closed:
+            return
         self.closed = True
         self.enabled = False
         self.poll_timer.stop()
