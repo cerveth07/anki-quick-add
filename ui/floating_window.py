@@ -68,8 +68,9 @@ class FloatingOrb(QWidget):
     moved = Signal()
     menu_requested = Signal(QPoint)
 
-    def __init__(self):
+    def __init__(self, owner):
         super().__init__(None, FLAGS | Qt.WindowType.WindowDoesNotAcceptFocus)
+        self.owner = owner
         prepare_window(self)
         self.setWindowTitle("Anki Quick Add · 悬浮球")
         self.setFixedSize(72, 72)
@@ -135,10 +136,17 @@ class FloatingOrb(QWidget):
                 self.clicked.emit()
             self._press = None
 
+    def closeEvent(self, event):
+        # Native close/Alt+F4 is an application exit, not an invisible listener.
+        if not self.owner.closed:
+            self.owner.main.close()
+        event.accept() if self.owner.closed else event.ignore()
+
 
 class FloatingPanel(QWidget):
     def __init__(self, owner):
         super().__init__(None, FLAGS)
+        self.owner = owner
         prepare_window(self)
         self.setWindowTitle("Anki Quick Add · 词卡预览")
         self.setStyleSheet(STYLE)
@@ -238,6 +246,13 @@ class FloatingPanel(QWidget):
         actions.addWidget(self.add_button)
         layout.addLayout(actions)
 
+    def closeEvent(self, event):
+        if self.owner.closed:
+            event.accept()
+        else:
+            event.ignore()
+            self.owner.collapse_preview()
+
 
 class FloatingToast(QWidget):
     def __init__(self, fonts):
@@ -288,7 +303,7 @@ class FloatingCapture(QObject):
         self._submitted_title = ""
         self.quick_add = main._state.get("floating_quick_add", True) is not False
         self._action_scheduled = False
-        self.orb = FloatingOrb()
+        self.orb = FloatingOrb(self)
         self.panel = FloatingPanel(self)
         self.toast = FloatingToast(main.fonts)
         self.orb.clicked.connect(self.toggle_preview)

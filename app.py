@@ -252,7 +252,7 @@ def main() -> int:
         window.show()
         QTimer.singleShot(0, window.focus_paste)
     QTimer.singleShot(0, window._sync_focus)
-    QTimer.singleShot(50, window.controller.startup)
+    QTimer.singleShot(50, lambda: window.controller.startup() if not window._closing else None)
     QTimer.singleShot(400, lambda: log.info("窗口实际 geometry=%s", window.geometry()))
     return app.exec()
 

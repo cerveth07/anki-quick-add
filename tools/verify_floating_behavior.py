@@ -84,8 +84,9 @@ class Executor:
         job, done = self.jobs.pop(0)
         self.deliver(job, done)
 
-    def shutdown(self):
-        pass
+    def shutdown(self, on_finished=None):
+        if on_finished:
+            on_finished()
 
 
 class FloatingTests(unittest.TestCase):
@@ -421,6 +422,94 @@ class FloatingTests(unittest.TestCase):
         self.floating.shutdown()
         self.drain()
         self.assertEqual(self.checker.added, [])
+
+    def test_closing_orb_exits_instead_of_leaving_hidden_listener(self):
+        self.floating.orb.close()
+        APP.processEvents()
+        self.assertTrue(self.window._closing)
+        self.assertTrue(self.floating.closed)
+        self.assertFalse(self.floating.poll_timer.isActive())
+        self.assertFalse(self.floating.orb.isVisible())
+
+    def test_native_preview_close_keeps_orb_and_selected_mode(self):
+        self.copy(raw())
+        self.floating.toggle_preview()
+        self.floating.panel.close()
+        APP.processEvents()
+        self.assertFalse(self.floating.panel.isVisible())
+        self.assertTrue(self.floating.orb.isVisible())
+        self.assertFalse(self.window._closing)
+        self.assertFalse(self.floating.quick_add)
+
+    def test_real_worker_shutdown_stays_visible_until_request_finishes(self):
+        script = '''
+import json, sys
+from threading import Event
+sys.path.insert(0, "tools")
+from PySide6.QtCore import QTimer
+from verify_floating_behavior import APP, FakeChecker, ROOT
+from ui.main_window import MainWindow
+from ui.qt_executor import QtThreadedExecutor
+executor=QtThreadedExecutor()
+started, release, completed=Event(), Event(), Event()
+callbacks, queued_runs=[], []
+window=MainWindow(FakeChecker(), {}, lambda **kw: None, str(ROOT), executor=executor)
+window.floating.enable()
+def job():
+    started.set()
+    release.wait(1)
+    completed.set()
+executor(job, lambda value,error: callbacks.append(value))
+assert started.wait(1)
+executor(lambda: queued_runs.append(True), lambda value,error: callbacks.append(value))
+observed={}
+def inspect_and_release():
+    observed["waiting_visible"]=window.isVisible() and window._closing
+    observed["orb_closed"]=not window.floating.orb.isVisible()
+    observed["exit_message"]="正在退出" in window.status_label.text()
+    release.set()
+QTimer.singleShot(0, window.floating.orb.close)
+QTimer.singleShot(150, inspect_and_release)
+QTimer.singleShot(3000, APP.quit)
+APP.exec()
+observed["completed_before_exit"]=completed.is_set()
+observed["callbacks_after_close"]=len(callbacks)
+observed["queued_jobs_ran"]=len(queued_runs)
+print(json.dumps(observed),flush=True)
+'''
+        result = subprocess.run([sys.executable, "-c", script], cwd=ROOT,
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        observed = json.loads(result.stdout.strip().splitlines()[-1])
+        self.assertTrue(observed.get("waiting_visible"), observed)
+        self.assertTrue(observed.get("orb_closed"), observed)
+        self.assertTrue(observed.get("exit_message"), observed)
+        self.assertTrue(observed["completed_before_exit"], observed)
+        self.assertEqual(observed["callbacks_after_close"], 0)
+        self.assertEqual(observed["queued_jobs_ran"], 0)
+
+    def test_real_executor_delivers_values_and_errors_on_gui_thread(self):
+        from threading import get_ident
+        from ui.qt_executor import QtThreadedExecutor
+
+        executor = QtThreadedExecutor()
+        results = []
+        gui_thread = get_ident()
+        executor(lambda: (42, get_ident()),
+                 lambda value, error: results.append((value, error, get_ident())))
+        executor(lambda: 1 / 0,
+                 lambda value, error: results.append((value, error, get_ident())))
+        for _ in range(100):
+            if len(results) == 2:
+                break
+            QTest.qWait(10)
+        executor.shutdown()
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0][0][0], 42)
+        self.assertNotEqual(results[0][0][1], gui_thread)
+        self.assertIsNone(results[0][1])
+        self.assertIsInstance(results[1][1], ZeroDivisionError)
+        self.assertEqual([item[2] for item in results], [gui_thread, gui_thread])
 
     def test_popup_stays_on_screen_at_both_edges(self):
         area = self.floating.orb.screen().availableGeometry()

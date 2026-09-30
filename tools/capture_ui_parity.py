@@ -38,8 +38,9 @@ class NoopExecutor:
     def __call__(self, job, done):
         return None
 
-    def shutdown(self):
-        return None
+    def shutdown(self, on_finished=None):
+        if on_finished:
+            on_finished()
 
 
 def capture(widget, path: Path) -> None:
