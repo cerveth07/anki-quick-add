@@ -485,6 +485,7 @@ class MainWindow(QMainWindow):
         if not app_icon.isNull():
             self.setWindowIcon(app_icon)
         self._closing = False
+        self._exit_ready = False
         self.floating = None
         self.default_deck = checker.adapter.config.deck_name
         self.executor = executor or QtThreadedExecutor()
@@ -512,7 +513,9 @@ class MainWindow(QMainWindow):
         self.controller = QuickAddController(
             checker,
             view=self,
-            schedule=lambda delay, callback: QTimer.singleShot(delay, callback),
+            schedule=lambda delay, callback: QTimer.singleShot(
+                delay, lambda: callback() if not self._closing else None
+            ),
             executor=self.executor,
             initial_deck=initial_deck,
         )
@@ -1041,6 +1044,13 @@ class MainWindow(QMainWindow):
         return f"{rect.width()}x{rect.height()}{rect.x():+d}{rect.y():+d}"
 
     def closeEvent(self, event) -> None:
+        if self._exit_ready:
+            event.accept()
+            QApplication.instance().quit()
+            return
+        event.ignore()
+        if self._closing:
+            return
         self._closing = True
         try:
             self._persist_format_prompt()
@@ -1049,8 +1059,14 @@ class MainWindow(QMainWindow):
             log.exception("保存窗口状态失败")
         self.prompt_popover.hide()
         self.connection_popover.hide()
+        self._format_prompt_save_timer.stop()
+        self.setEnabled(False)
+        self.set_status("正在退出，等待当前 Anki 请求完成…", "info")
+        self.showNormal()
         if self.floating is not None:
             self.floating.shutdown()
-        self.executor.shutdown()
-        event.accept()
-        QApplication.instance().quit()
+        self.executor.shutdown(on_finished=self._finish_exit)
+
+    def _finish_exit(self) -> None:
+        self._exit_ready = True
+        QTimer.singleShot(0, self.close)

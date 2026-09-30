@@ -124,6 +124,7 @@ def save_state(
     format_prompt: str | None = None,
     anki_executable: str | None = None,
     floating_position: list[int] | None = None,
+    floating_quick_add: bool | None = None,
 ) -> None:
     data = load_state()
     if geometry and _parse_geometry(geometry) is not None:
@@ -139,6 +140,8 @@ def save_state(
             data.pop("anki_executable", None)
     if floating_position is not None:
         data["floating_position"] = floating_position
+    if floating_quick_add is not None:
+        data["floating_quick_add"] = floating_quick_add
     try:
         with open(_state_path(), "w", encoding="utf-8") as handle:
             json.dump(data, handle, ensure_ascii=False)
@@ -249,7 +252,7 @@ def main() -> int:
         window.show()
         QTimer.singleShot(0, window.focus_paste)
     QTimer.singleShot(0, window._sync_focus)
-    QTimer.singleShot(50, window.controller.startup)
+    QTimer.singleShot(50, lambda: window.controller.startup() if not window._closing else None)
     QTimer.singleShot(400, lambda: log.info("窗口实际 geometry=%s", window.geometry()))
     return app.exec()
 
