@@ -80,8 +80,22 @@ def acquire_single_instance() -> tuple[object, bool]:
 def activate_existing_window() -> None:
     try:
         import ctypes
+        from ctypes import wintypes
 
         user32 = ctypes.windll.user32
+        user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+        user32.FindWindowW.restype = wintypes.HWND
+        user32.IsWindowVisible.argtypes = [wintypes.HWND]
+        user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+        user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+        # An explicit second launch must not reveal a hidden main window
+        # behind a running floating session or create another clipboard owner.
+        orb = user32.FindWindowW(None, "Anki Quick Add · 悬浮球")
+        if orb and user32.IsWindowVisible(orb):
+            preview = user32.FindWindowW(None, "Anki Quick Add · 词卡预览")
+            if preview and user32.IsWindowVisible(preview):
+                user32.SetForegroundWindow(preview)
+            return
         hwnd = user32.FindWindowW(None, APP_TITLE)
         if hwnd:
             user32.ShowWindow(hwnd, 9)  # SW_RESTORE
@@ -109,6 +123,7 @@ def save_state(
     deck: str | None = None,
     format_prompt: str | None = None,
     anki_executable: str | None = None,
+    floating_position: list[int] | None = None,
 ) -> None:
     data = load_state()
     if geometry and _parse_geometry(geometry) is not None:
@@ -122,6 +137,8 @@ def save_state(
             data["anki_executable"] = anki_executable
         else:
             data.pop("anki_executable", None)
+    if floating_position is not None:
+        data["floating_position"] = floating_position
     try:
         with open(_state_path(), "w", encoding="utf-8") as handle:
             json.dump(data, handle, ensure_ascii=False)
@@ -226,8 +243,11 @@ def main() -> int:
         bundle_dir=BUNDLE_DIR,
     )
     apply_geometry(window, state.get("geometry"))
-    window.show()
-    QTimer.singleShot(0, window.focus_paste)
+    if "--floating" in sys.argv:
+        window.floating.enable()
+    else:
+        window.show()
+        QTimer.singleShot(0, window.focus_paste)
     QTimer.singleShot(0, window._sync_focus)
     QTimer.singleShot(50, window.controller.startup)
     QTimer.singleShot(400, lambda: log.info("窗口实际 geometry=%s", window.geometry()))

@@ -16,6 +16,8 @@ Anki Quick Add 是一个面向外语学习的 LLM 查词与 Anki 制卡工具，
 - 内置日语字词与句子查询提示词，可以一键复制给 LLM。
 - 提示词可以自行修改，也可以恢复默认内容。
 - Anki 未连接时仍然可以粘贴、查看和编辑卡片。
+- 浅色悬浮球常驻其他窗口上方，后台识别剪贴板中的词卡 JSON。
+- 连续复制的词卡依次排队，确认后添加；成功提示自动收起，失败保留内容。
 
 ## 使用方法
 
@@ -47,6 +49,26 @@ AnkiQuickAdd/AnkiQuickAdd.exe
 
 程序只使用 `front` 和 `back` 两个字段。
 
+## 悬浮制卡
+
+主窗口右上角点击「悬浮制卡」，窗口收起为可拖动的小球。在 ChatGPT 或其他应用复制符合上述格式的 JSON，预览会自动出现，并且不会抢走当前应用的输入焦点。
+
+- 小球角标显示待添加数量；重复的剪贴板内容不会反复入队。
+- 在预览中检查或直接编辑正面、背面，选择牌组，再点击「添加到 Anki」。仅在确认后提交。
+- 成功后显示「已添加到 Anki」约 2 秒，然后显示下一张待确认卡片。查重发现已有卡片时不会提交。
+- Anki 未连接或添加失败时保留内容。点击「重连」或「重试连接」，查重通过后再次确认添加。
+- 点击小球或预览右上角「−」可收起预览。点击「↗」返回主窗口；编辑内容和牌组保持同步，返回主窗口后停止后台监听。
+- 右键小球可以打开主窗口、暂停/恢复监听或退出。退出会丢弃尚未添加的卡片；本版本的队列保存在当前会话中。
+- 笔记类型使用现有 `config.json` 配置，此版本仍处理 `front/back` 两个字段。
+
+源码运行时可直接进入悬浮模式：
+
+```powershell
+python app.py --floating
+```
+
+![实际 Qt 悬浮制卡界面](docs/floating-preview.png)
+
 
 ## 运行要求
 
@@ -64,6 +86,14 @@ Windows 发布包已经包含 Python、PySide6 和 Qt 运行时，不需要另�
 ```powershell
 python -m pip install -r requirements.txt
 python app.py
+```
+
+悬浮窗行为验证（使用模拟 Anki，不写入真实卡片）：
+
+```powershell
+python tools/verify_runtime_behavior.py
+python tools/verify_floating_behavior.py
+python tools/capture_floating_ui.py
 ```
 
 如需构建 Windows 发布包：
