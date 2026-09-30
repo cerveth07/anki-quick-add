@@ -447,14 +447,18 @@ import json, sys
 from threading import Event
 sys.path.insert(0, "tools")
 from PySide6.QtCore import QTimer
+print("shutdown-test: importing Qt view", flush=True)
 from verify_floating_behavior import APP, FakeChecker, ROOT
+print("shutdown-test: QApplication ready", flush=True)
 from ui.main_window import MainWindow
 from ui.qt_executor import QtThreadedExecutor
 executor=QtThreadedExecutor()
 started, release, completed=Event(), Event(), Event()
 callbacks, queued_runs=[], []
 window=MainWindow(FakeChecker(), {}, lambda **kw: None, str(ROOT), executor=executor)
+print("shutdown-test: window ready", flush=True)
 window.floating.enable()
+print("shutdown-test: floating ready", flush=True)
 def job():
     started.set()
     release.wait(1)
@@ -477,10 +481,26 @@ observed["callbacks_after_close"]=len(callbacks)
 observed["queued_jobs_ran"]=len(queued_runs)
 print(json.dumps(observed),flush=True)
 '''
-        result = subprocess.run([sys.executable, "-c", script], cwd=ROOT,
-                                capture_output=True, text=True, timeout=5)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        observed = json.loads(result.stdout.strip().splitlines()[-1])
+        # Windows clipboard reads can send messages to this parent application.
+        # Keep its Qt loop responsive while the child exercises native windows.
+        process = subprocess.Popen([sys.executable, "-c", script], cwd=ROOT,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            for _ in range(100):
+                if process.poll() is not None:
+                    break
+                QTest.qWait(50)
+            if process.poll() is None:
+                process.kill()
+                stdout, stderr = process.communicate(timeout=5)
+                self.fail(f"Shutdown subprocess timed out:\n{stdout}\n{stderr}")
+            stdout, stderr = process.communicate(timeout=5)
+            self.assertEqual(process.returncode, 0, stderr)
+            observed = json.loads(stdout.strip().splitlines()[-1])
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate(timeout=5)
         self.assertTrue(observed.get("waiting_visible"), observed)
         self.assertTrue(observed.get("orb_closed"), observed)
         self.assertTrue(observed.get("exit_message"), observed)
