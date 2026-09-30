@@ -1,0 +1,45 @@
+name: Floating UI Smoke
+
+on:
+  push:
+    branches: ["feat/floating-quick-add-*"]
+  pull_request:
+    paths:
+      - "*.py"
+      - "ui/**"
+      - "tools/*floating*"
+      - ".github/workflows/floating-ui-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-floating:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: "1"
+      QT_OPENGL: software
+      QT_QPA_PLATFORM: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install existing runtime dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Verify controller and floating behavior
+        run: |
+          python tools/verify_runtime_behavior.py
+          python tools/verify_floating_behavior.py
+      - name: Capture actual floating UI
+        run: python tools/capture_floating_ui.py
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: floating-ui-windows
+          path: artifacts/floating-ui/*.png
+          if-no-files-found: warn
+          retention-days: 14

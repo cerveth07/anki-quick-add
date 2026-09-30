@@ -40,6 +40,7 @@ from anki_launcher import (
     launch_anki,
 )
 from controller import QuickAddController, short_deck
+from ui.floating_window import FloatingCapture
 from ui.qt_executor import QtThreadedExecutor
 from ui.theme import (
     GAP_LABEL,
@@ -484,6 +485,7 @@ class MainWindow(QMainWindow):
         if not app_icon.isNull():
             self.setWindowIcon(app_icon)
         self._closing = False
+        self.floating = None
         self.default_deck = checker.adapter.config.deck_name
         self.executor = executor or QtThreadedExecutor()
         self.fonts, self.font_notes = load_fonts(bundle_dir)
@@ -515,6 +517,7 @@ class MainWindow(QMainWindow):
             initial_deck=initial_deck,
         )
         self._build()
+        self.floating = FloatingCapture(self)
 
         app = QApplication.instance()
         if app is not None:
@@ -550,6 +553,13 @@ class MainWindow(QMainWindow):
         self.format_button.setMinimumWidth(144)
         self.format_button.setFixedHeight(40)
         self.format_button.clicked.connect(self.toggle_format)
+        self.floating_button = QPushButton("悬浮制卡", header)
+        self.floating_button.setObjectName("secondaryButton")
+        self.floating_button.setFont(self.fonts["button"])
+        self.floating_button.setFixedHeight(40)
+        self.floating_button.clicked.connect(lambda: self.floating.enable())
+        header_layout.addWidget(self.floating_button)
+        header_layout.addSpacing(10)
         header_layout.addWidget(self.format_button, 0, Qt.AlignmentFlag.AlignVCenter)
         outer.addWidget(header)
 
@@ -986,14 +996,18 @@ class MainWindow(QMainWindow):
         del blocker
 
     def focus_paste(self) -> None:
+        if not self.isVisible():
+            return
         self.paste_box.setFocus(Qt.FocusReason.OtherFocusReason)
-        QTimer.singleShot(0, lambda: self.paste_box.setFocus(Qt.FocusReason.OtherFocusReason))
+        QTimer.singleShot(0, lambda: self.paste_box.setFocus(Qt.FocusReason.OtherFocusReason) if self.isVisible() else None)
 
     def set_enabled(self, add_enabled: bool, editable: bool) -> None:
         self.add_button.setEnabled(add_enabled)
         for editor in (self.paste_box, self.front_box, self.back_box):
             editor.setReadOnly(not editable)
         self.deck_box.setEnabled(editable)
+        if self.floating is not None:
+            self.floating.sync()
 
     def _on_deck_selected(self, name: str) -> None:
         name = (name or "").strip()
@@ -1034,5 +1048,9 @@ class MainWindow(QMainWindow):
         except Exception:
             log.exception("保存窗口状态失败")
         self.prompt_popover.hide()
+        self.connection_popover.hide()
+        if self.floating is not None:
+            self.floating.shutdown()
         self.executor.shutdown()
         event.accept()
+        QApplication.instance().quit()
