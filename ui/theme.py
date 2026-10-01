@@ -55,6 +55,12 @@ PROMPT_BG_HOVER = "#F5F8FF"
 PROMPT_BG_PRESSED = "#ECF3FF"
 PROMPT_BORDER = "#CFE0FA"
 
+# Floating panel typography (logical pixels) -------------------------------
+FLOAT_TITLE_SIZE = 18
+FLOAT_CONTROL_SIZE = 13
+FLOAT_META_SIZE = 12
+FLOAT_EDITOR_SIZE = 16
+
 # Layout ------------------------------------------------------------------
 PAGE_SIDE = 30
 PAGE_TOP = 20
@@ -298,47 +304,26 @@ QLabel#connectionDetail {{
 }}
 
 
-QPushButton#connectionPrimaryButton,
-QPushButton#connectionSecondaryButton {{
-    border-radius: 7px;
+QPushButton#connectionMenuItem {{
+    color: {TEXT};
+    background: transparent;
+    border: none;
+    border-radius: 6px;
     padding: 0px 12px;
+    min-height: 40px;
+    max-height: 40px;
     text-align: left;
 }}
-QPushButton#connectionPrimaryButton {{
-    color: {PRIMARY};
-    background: #F3F6FC;
-    border: 1px solid #D9E2F3;
+QPushButton#connectionMenuItem:hover,
+QPushButton#connectionMenuItem:focus {{
+    background: #F0F4FB;
 }}
-QPushButton#connectionPrimaryButton:hover {{
-    background: #EAF0FA;
-    border-color: #C5D4EC;
+QPushButton#connectionMenuItem:pressed {{
+    background: #E5ECF8;
 }}
-QPushButton#connectionPrimaryButton:pressed {{
-    background: #DFE8F6;
-    border-color: #B5C7E4;
-}}
-QPushButton#connectionPrimaryButton:disabled {{
-    color: {DISABLED_TEXT};
-    background: #F6F7F9;
-    border-color: {BORDER};
-}}
-QPushButton#connectionSecondaryButton {{
-    color: {TEXT};
-    background: {SURFACE};
-    border: 1px solid {BORDER};
-}}
-QPushButton#connectionSecondaryButton:hover {{
-    background: #F7F8FA;
-    border-color: #C9CFD8;
-}}
-QPushButton#connectionSecondaryButton:pressed {{
-    background: #EFF1F4;
-    border-color: #BCC3CD;
-}}
-QPushButton#connectionSecondaryButton:disabled {{
-    color: {DISABLED_TEXT};
-    background: #F8F8F8;
-    border-color: {BORDER};
+QPushButton#connectionMenuItem:disabled {{
+    color: {MUTED};
+    background: transparent;
 }}
 
 QFrame#pasteSurface, QFrame#deckSurface {{

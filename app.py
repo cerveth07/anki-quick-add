@@ -39,6 +39,15 @@ LEGACY_SIGNED_GEOMETRY_RE = re.compile(r"^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$")
 
 BUNDLE_DIR = os.path.abspath(getattr(sys, "_MEIPASS", APP_DIR))
 
+def app_version() -> str:
+    path = os.path.join(BUNDLE_DIR, "VERSION")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read().strip()
+    except OSError:
+        return "unknown"
+
+
 log = logging.getLogger("aqa")
 
 
@@ -213,7 +222,7 @@ def apply_geometry(window: MainWindow, value: str | None) -> None:
 # --------------------------------------------------------------------------- main
 def main() -> int:
     log_path = setup_logging()
-    log.info("%s 启动，日志：%s", APP_TITLE, log_path)
+    log.info("%s v%s 启动，日志：%s", APP_TITLE, app_version(), log_path)
 
     _mutex, already_running = acquire_single_instance()
     if already_running:

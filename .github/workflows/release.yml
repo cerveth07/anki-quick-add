@@ -22,6 +22,10 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Validate version and prepare release notes
+        shell: pwsh
+        run: python tools/release_notes.py "$env:GITHUB_REF_NAME" release-notes.md
+
       - name: Install build dependencies
         shell: pwsh
         run: |
@@ -38,6 +42,8 @@ jobs:
         run: |
           $required = @(
             "dist/AnkiQuickAdd/AnkiQuickAdd.exe",
+            "dist/AnkiQuickAdd/VERSION",
+            "dist/AnkiQuickAdd/CHANGELOG.md",
             "dist/AnkiQuickAdd/_internal/PySide6/Qt6Core.dll",
             "dist/AnkiQuickAdd/_internal/PySide6/Qt6Gui.dll",
             "dist/AnkiQuickAdd/_internal/PySide6/Qt6Widgets.dll",
@@ -80,4 +86,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$env:GITHUB_REF_NAME" "dist/AnkiQuickAdd-Windows.zip" "dist/SHA256SUMS.txt" --verify-tag --generate-notes --title "Anki Quick Add $env:GITHUB_REF_NAME"
+          gh release create "$env:GITHUB_REF_NAME" "dist/AnkiQuickAdd-Windows.zip" "dist/SHA256SUMS.txt" --verify-tag --notes-file release-notes.md --title "Anki Quick Add $env:GITHUB_REF_NAME"

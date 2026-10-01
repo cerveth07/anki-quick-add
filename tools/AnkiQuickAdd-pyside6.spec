@@ -18,6 +18,7 @@ datas = [
     *((str(project_root / "fonts" / name), "fonts") for name in bundled_font_files),
     (str(project_root / "assets" / "anki-quick-add.ico"), "assets"),
     (str(project_root / "config.json"), "."),
+    (str(project_root / "VERSION"), "."),
     (str(project_root / "ui" / "icons"), "ui/icons"),
 ]
 

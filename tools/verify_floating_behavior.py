@@ -86,6 +86,21 @@ class Executor:
         pass
 
 
+class MemoryClipboard:
+    """Deterministic copy fixtures; real Windows transport has separate tests."""
+
+    def __init__(self):
+        self.value = ""
+        # Keep the original signal so shutdown disconnects the real registration.
+        self.dataChanged = APP.clipboard().dataChanged
+
+    def text(self):
+        return self.value
+
+    def setText(self, value):
+        self.value = value
+
+
 class FloatingTests(unittest.TestCase):
     def setUp(self):
         APP.clipboard().setText("")
@@ -96,6 +111,7 @@ class FloatingTests(unittest.TestCase):
         self.window.controller._schedule = lambda delay, callback: callback()
         self.window.controller.startup()
         self.floating = self.window.floating
+        self.floating.clipboard = MemoryClipboard()
         self.floating.enable()
         APP.processEvents()
 
@@ -104,7 +120,8 @@ class FloatingTests(unittest.TestCase):
         APP.processEvents()
 
     def copy(self, value):
-        APP.clipboard().setText(value)
+        self.floating.clipboard.setText(value)
+        self.floating.read_clipboard()
         APP.processEvents()
 
     def test_capture_while_main_hidden_requires_confirmation(self):
@@ -181,8 +198,10 @@ class FloatingTests(unittest.TestCase):
         self.assertEqual(self.floating.panel.front_box.toPlainText(), "木漏れ日")
         self.assertEqual(self.floating.pending_count, 1)
         self.assertFalse(self.floating.toast.isVisible())
+        self.assertFalse(self.floating.panel.add_button.isEnabled())
+        self.assertTrue(self.floating.panel.retry_button.isEnabled())
         self.checker.fail_add = False
-        self.floating.submit()  # reconnect and recheck, no write yet
+        self.floating.panel.retry_button.click()  # reconnect and recheck, no write yet
         self.assertEqual(self.window.controller.state, State.READY)
         self.floating.submit()
         APP.processEvents()
@@ -195,6 +214,15 @@ class FloatingTests(unittest.TestCase):
         self.assertEqual(self.window.controller.state, State.ANKI_OFFLINE)
         self.assertFalse(self.floating.panel.front_box.isReadOnly())
         self.assertFalse(self.floating.toast.isVisible())
+        self.assertEqual(self.checker.added, [])
+        self.assertEqual(self.floating.panel.add_button.text(), "添加到 Anki")
+        self.assertFalse(self.floating.panel.add_button.isEnabled())
+        self.assertTrue(self.floating.panel.retry_button.isEnabled())
+        self.checker.offline = False
+        self.floating.panel.retry_button.click()
+        self.assertEqual(self.window.controller.state, State.READY)
+        self.assertTrue(self.floating.panel.add_button.isEnabled())
+        self.assertEqual(self.floating.panel.front_box.toPlainText(), "木漏れ日")
         self.assertEqual(self.checker.added, [])
 
     def test_switching_views_shares_edits_and_deck(self):
@@ -213,7 +241,7 @@ class FloatingTests(unittest.TestCase):
     def test_existing_manual_draft_is_not_replaced(self):
         self.floating.open_main()
         self.window.paste_box.setPlainText(raw("draft"))
-        APP.clipboard().setText(raw("new"))
+        self.floating.clipboard.setText(raw("new"))
         self.floating.enable()
         APP.processEvents()
         self.assertEqual(self.window.controller.card.front, "draft")
@@ -237,8 +265,237 @@ class FloatingTests(unittest.TestCase):
         self.assertTrue(self.floating.panel.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating))
         self.assertTrue(self.floating.orb.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
 
+    def settle_auto(self):
+        # Allow queued submit/completion callbacks to run on separate event turns.
+        for _ in range(12):
+            APP.processEvents()
+
+    def test_auto_add_toggle_is_off_by_default_and_adds_without_popups(self):
+        self.assertFalse(self.floating.auto_add)
+        self.assertFalse(self.floating.panel.auto_add_switch.isChecked())
+        self.floating.toggle_preview()
+        self.floating.panel.auto_add_switch.click()
+        self.assertTrue(self.floating.auto_add)
+        self.copy(raw())
+        self.settle_auto()
+        self.assertEqual(self.checker.added, [("木漏れ日", "日语")])
+        self.assertEqual(self.floating.pending_count, 0)
+        self.assertEqual(self.floating.auto_added_count, 1)
+        self.assertFalse(self.floating.panel.isVisible())
+        self.assertFalse(self.floating.toast.isVisible())
+        self.assertFalse(self.floating.success_timer.isActive())
+        self.assertIn("本次已添加 1 张", self.floating.orb.toolTip())
+
+    def test_auto_add_filters_invalid_and_repeated_copies(self):
+        self.floating.set_auto_add(True)
+        for value in ('ordinary text', '{"front":"missing back"}', '{"front":8,"back":"x"}', '[]'):
+            self.copy(value)
+        self.assertEqual(self.checker.added, [])
+        self.copy(raw())
+        self.settle_auto()
+        self.copy('ordinary text')
+        self.copy('```json\n' + raw() + '\n```')
+        self.settle_auto()
+        self.assertEqual(self.checker.added, [("木漏れ日", "日语")])
+        self.assertFalse(self.floating.panel.isVisible())
+
+    def test_auto_add_serializes_queued_copies_and_skips_existing_notes(self):
+        self.checker.added.append(("重复", "日语"))
+        self.floating.set_auto_add(True)
+        self.executor.defer = True
+        self.copy(raw("一"))
+        self.copy(raw("重复"))
+        self.copy(raw("二"))
+        self.assertEqual(self.floating.pending_count, 3)
+        for _ in range(30):
+            if self.executor.jobs:
+                self.assertEqual(len(self.executor.jobs), 1)
+                self.executor.finish()
+            self.settle_auto()
+            if not self.floating.pending_count:
+                break
+        self.assertEqual(self.checker.added, [("重复", "日语"), ("一", "日语"), ("二", "日语")])
+        self.assertEqual(self.floating.auto_added_count, 2)
+        self.assertEqual(self.floating.auto_skipped_count, 1)
+        self.assertEqual(self.floating.pending_count, 0)
+        self.assertFalse(self.floating.panel.isVisible())
+        self.assertFalse(self.floating.toast.isVisible())
+
+    def test_turning_auto_off_during_check_requires_manual_confirmation(self):
+        self.floating.set_auto_add(True)
+        self.executor.defer = True
+        self.copy(raw())
+        self.floating.set_auto_add(False)
+        self.executor.finish()
+        self.settle_auto()
+        self.assertEqual(self.window.controller.state, State.READY)
+        self.assertEqual(self.checker.added, [])
+        self.floating.set_auto_add(True)  # Re-enabling doesn't add an older draft.
+        self.settle_auto()
+        self.assertEqual(self.checker.added, [])
+        self.floating.submit()
+        self.executor.finish()
+        self.settle_auto()
+        self.assertEqual(self.checker.added, [("木漏れ日", "日语")])
+
+    def test_auto_add_failure_retains_queue_and_retries_only_on_request(self):
+        self.floating.set_auto_add(True)
+        self.checker.fail_add = True
+        self.copy(raw("一"))
+        self.settle_auto()
+        self.copy(raw("二"))
+        self.settle_auto()
+        self.assertEqual(self.window.controller.state, State.ERROR)
+        self.assertEqual(self.floating.pending_count, 2)
+        self.assertEqual(self.checker.added, [])
+        self.assertFalse(self.floating.panel.isVisible())
+        self.assertFalse(self.floating.toast.isVisible())
+        self.assertTrue(self.floating.orb.attention)
+        self.checker.fail_add = False
+        self.settle_auto()
+        self.assertEqual(self.checker.added, [])
+        self.floating.toggle_preview()
+        self.floating.panel.retry_button.click()
+        self.settle_auto()
+        self.assertEqual(self.checker.added, [("一", "日语"), ("二", "日语")])
+        self.assertEqual(self.floating.pending_count, 0)
+
+    def test_auto_add_offline_preserves_content_and_current_deck(self):
+        self.floating.select_deck("Other")
+        self.floating.set_auto_add(True)
+        self.checker.offline = True
+        self.window.controller._capabilities_ok = None
+        self.copy(raw())
+        self.settle_auto()
+        self.assertEqual(self.window.controller.state, State.ANKI_OFFLINE)
+        self.assertEqual(self.floating.pending_count, 1)
+        self.assertEqual(self.checker.added, [])
+        self.assertFalse(self.floating.panel.isVisible())
+        self.checker.offline = False
+        self.window.controller.retry_connection()
+        self.settle_auto()
+        self.assertEqual(self.checker.added, [("木漏れ日", "Other")])
+
+    def test_enabling_auto_preserves_existing_manual_draft_and_queue(self):
+        self.copy(raw("已有草稿"))
+        self.copy(raw("已有队列"))
+        self.floating.set_auto_add(True)
+        self.copy(raw("新复制"))
+        self.settle_auto()
+        self.assertEqual(self.checker.added, [])
+        self.assertEqual(self.floating.pending_count, 3)
+        self.floating.ignore()
+        self.settle_auto()
+        self.assertEqual(self.window.controller.card.front, "已有队列")
+        self.assertEqual(self.checker.added, [])
+        self.floating.ignore()
+        self.settle_auto()
+        self.assertEqual(self.checker.added, [("新复制", "日语")])
+
+    def test_editing_auto_card_cancels_automatic_submission(self):
+        self.floating.set_auto_add(True)
+        self.executor.defer = True
+        self.copy(raw())
+        self.floating.toggle_preview()
+        self.floating.panel.back_box.setPlainText("我修改的释义")
+        for _ in range(5):
+            if self.executor.jobs:
+                self.executor.finish()
+            self.settle_auto()
+        self.assertEqual(self.checker.added, [])
+        self.assertEqual(self.window.controller.card.back, "我修改的释义")
+        self.assertFalse(self.floating.active.auto_add)
+
+    def test_pause_or_returning_to_main_cancels_auto_before_submission(self):
+        self.floating.set_auto_add(True)
+        self.executor.defer = True
+        self.copy(raw())
+        self.floating.toggle_listening()
+        self.executor.finish()
+        self.settle_auto()
+        self.assertEqual(self.checker.added, [])
+        self.floating.toggle_listening()
+        self.settle_auto()
+        self.assertEqual(self.window.controller.state, State.ADDING)
+        self.floating.set_auto_add(False)  # Already dispatched writes finish once.
+        self.executor.finish()
+        self.settle_auto()
+        self.assertEqual(self.checker.added, [("木漏れ日", "日语")])
+        self.assertFalse(self.floating.toast.isVisible())
+        self.floating.set_auto_add(True)
+        self.copy(raw("留给主窗口"))
+        self.floating.open_main()
+        self.executor.finish()
+        self.settle_auto()
+        self.assertFalse(self.floating.auto_add)
+        self.assertEqual(self.checker.added, [("木漏れ日", "日语")])
+
+    def test_discard_during_duplicate_callback_does_not_stall_auto_queue(self):
+        self.checker.added.append(("重复", "日语"))
+        self.floating.set_auto_add(True)
+        self.executor.defer = True
+        self.copy(raw("重复"))
+        self.copy(raw("下一张"))
+        self.executor.finish()
+        self.floating.ignore()  # Cancel before the queued duplicate skip executes.
+        for _ in range(20):
+            self.settle_auto()
+            if self.executor.jobs:
+                self.executor.finish()
+        self.assertEqual(self.checker.added, [("重复", "日语"), ("下一张", "日语")])
+        self.assertEqual(self.floating.pending_count, 0)
+
+    def assert_popup_is_closed(self, combo, action):
+        combo.window().show()
+        combo.window().activateWindow()
+        QTest.qWait(100)
+        combo.showPopup()
+        APP.processEvents()
+        popup = combo.view().window()
+        self.assertTrue(popup.isVisible())
+        action()
+        # Wait beyond the old rollout: it must never resurrect a hidden popup.
+        QTest.qWait(400)
+        self.assertFalse(popup.isVisible())
+        self.assertFalse(any(widget.isVisible() and widget.metaObject().className() == "QRollEffect"
+                             for widget in APP.topLevelWidgets()))
+
+    def test_deck_popup_closes_when_preview_is_collapsed_or_closed(self):
+        self.assertFalse(APP.isEffectEnabled(Qt.UIEffect.UI_AnimateCombo))
+        self.floating.toggle_preview()
+        self.assert_popup_is_closed(self.floating.panel.deck_box, self.floating.panel.collapse_button.click)
+        self.floating.toggle_preview()
+        self.assert_popup_is_closed(self.floating.panel.deck_box, self.floating.panel.close)
+
+    def test_deck_popup_closes_on_mode_switch_and_repeated_shutdown(self):
+        self.floating.toggle_preview()
+        self.assert_popup_is_closed(self.floating.panel.deck_box, self.floating.open_main)
+        self.floating.enable()
+        self.floating.toggle_preview()
+        self.assert_popup_is_closed(self.floating.panel.deck_box, lambda: self.floating.set_auto_add(True))
+        self.floating.toggle_preview()
+        self.assert_popup_is_closed(self.floating.panel.deck_box, self.floating.shutdown)
+        self.floating.shutdown()  # Cleanup is idempotent, including signal disconnect.
+
+    def test_main_deck_popup_closes_on_floating_switch_and_app_exit(self):
+        self.floating.open_main()
+        self.assert_popup_is_closed(self.window.deck_box, self.floating.enable)
+        self.floating.open_main()
+        self.assert_popup_is_closed(self.window.deck_box, self.window.close)
+
     @unittest.skipUnless(sys.platform == "win32", "Windows foreground integration")
     def test_external_clipboard_copy_does_not_steal_windows_focus(self):
+        self._exercise_external_clipboard(automatic=False)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows foreground integration")
+    def test_auto_external_clipboard_adds_without_stealing_focus(self):
+        self._exercise_external_clipboard(automatic=True)
+
+    def _exercise_external_clipboard(self, automatic):
+        self.floating.clipboard = APP.clipboard()
+        APP.clipboard().setText("")
+        if automatic:
+            self.floating.set_auto_add(True)
         source = QWidget()
         layout = QVBoxLayout(source)
         editor = QLineEdit("继续阅读和输入")
@@ -259,10 +516,15 @@ class FloatingTests(unittest.TestCase):
             process = subprocess.Popen([sys.executable, "-c", script], env=env)
             for _ in range(100):
                 QTest.qWait(50)
-                if process.poll() is not None and self.floating.pending_count:
+                if process.poll() is not None and (self.checker.added if automatic else self.floating.pending_count):
                     break
             self.assertEqual(process.wait(timeout=5), 0)
-            self.assertEqual(self.floating.pending_count, 1)
+            if automatic:
+                self.assertEqual(self.checker.added, [("木漏れ日", "日语")])
+                self.assertFalse(self.floating.panel.isVisible())
+                self.assertFalse(self.floating.toast.isVisible())
+            else:
+                self.assertEqual(self.floating.pending_count, 1)
             self.assertIs(APP.activeWindow(), source)
             self.assertIs(APP.focusWidget(), editor)
         finally:

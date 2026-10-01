@@ -14,3 +14,7 @@ dist/
 *.7z
 artifacts/
 release/
+
+.codex/
+
+CONTEXT.md
