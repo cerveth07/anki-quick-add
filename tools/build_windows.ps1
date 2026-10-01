@@ -189,7 +189,9 @@ if (-not (Test-Path -LiteralPath $Executable)) {
     throw "Build completed without the expected executable: $Executable"
 }
 
-# Keep application and third-party notices visible at the package root.
+# Keep version history and third-party notices visible at the package root.
+Copy-Item -Force -LiteralPath (Join-Path $ProjectRoot "VERSION") -Destination (Join-Path $PackageDir "VERSION")
+Copy-Item -Force -LiteralPath (Join-Path $ProjectRoot "CHANGELOG.md") -Destination (Join-Path $PackageDir "CHANGELOG.md")
 Copy-Item -Force -LiteralPath (Join-Path $ProjectRoot "LICENSE") -Destination (Join-Path $PackageDir "LICENSE.txt")
 Copy-Item -Force -LiteralPath (Join-Path $ProjectRoot "THIRD_PARTY_NOTICES.md") -Destination (Join-Path $PackageDir "THIRD_PARTY_NOTICES.md")
 $PackageLicenseDir = Join-Path $PackageDir "licenses"

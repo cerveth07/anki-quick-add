@@ -2,9 +2,11 @@
 """Small standard Qt widgets used by the main window."""
 from __future__ import annotations
 
-from PySide6.QtCore import QMimeData, QSize, Qt
-from PySide6.QtGui import QFont, QIcon, QKeySequence
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QTextEdit
+from PySide6.QtCore import QMimeData, QRectF, QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QIcon, QKeySequence, QPainter, QPen
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QTextEdit, QWidget
+
+from ui.theme import CONNECTING
 
 
 class FocusSurface(QFrame):
@@ -127,6 +129,38 @@ class StatusDot(QFrame):
         style.polish(self)
         self.update()
 
+class ConnectionSpinner(QWidget):
+    """Animate only while the connection indicator is visible and busy."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(10, 10)
+        self._angle = 0
+        self._timer = QTimer(self)
+        self._timer.setInterval(60)
+        self._timer.timeout.connect(self._advance)
+
+    def _advance(self) -> None:
+        self._angle = (self._angle - 30) % 360
+        self.update()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._timer.start()
+
+    def hideEvent(self, event) -> None:
+        self._timer.stop()
+        super().hideEvent(event)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(CONNECTING), 1.6)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.drawArc(QRectF(1, 1, 8, 8), self._angle * 16, 250 * 16)
+
+
 class ConnectionButton(QPushButton):
     """Clickable Anki connection status control with dot, label and chevron."""
 
@@ -152,6 +186,10 @@ class ConnectionButton(QPushButton):
         self.dot = StatusDot(self)
         self.dot.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         layout.addWidget(self.dot, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self.spinner = ConnectionSpinner(self)
+        self.spinner.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self.spinner, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self.label = QLabel("Anki 连接中…", self)
         self.label.setObjectName("connectionButtonText")
@@ -186,6 +224,8 @@ class ConnectionButton(QPushButton):
         self.setAccessibleName(text)
         self.setProperty("level", level)
         self.dot.set_level(level)
+        self.dot.setVisible(level != "info")
+        self.spinner.setVisible(level == "info")
         style = self.style()
         style.unpolish(self)
         style.polish(self)

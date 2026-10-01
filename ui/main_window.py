@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QMainWindow,
     QPushButton,
     QSizePolicy,
@@ -62,7 +63,7 @@ from ui.theme import (
     WARN,
     load_fonts,
 )
-from ui.widgets import ConnectionButton, FocusSurface, PromptButton, ReplacePasteTextEdit, StatusDot
+from ui.widgets import ConnectionButton, FocusSurface, PromptButton, ReplacePasteTextEdit
 
 log = logging.getLogger("aqa")
 
@@ -272,7 +273,7 @@ class PromptPopover(QWidget):
 
 
 class ConnectionPopover(QWidget):
-    """Small anchored popup that explains the current Anki connection state."""
+    """Compact anchored menu of actions for the current connection state."""
 
     def __init__(self, parent: QWidget, fonts, bundle_dir: str):
         super().__init__(
@@ -284,9 +285,11 @@ class ConnectionPopover(QWidget):
         self.setObjectName("connectionPopover")
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setFixedWidth(292)
+        self.setFixedWidth(220)
 
         root = QVBoxLayout(self)
+        # Hidden menu rows must not retain the previous window minimum height.
+        root.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         root.setContentsMargins(10, 8, 10, 14)
         root.setSpacing(0)
 
@@ -300,67 +303,26 @@ class ConnectionPopover(QWidget):
         self._shadow = shadow
 
         panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(15, 13, 15, 13)
+        self._menu_layout = panel_layout
+        panel_layout.setContentsMargins(4, 4, 4, 4)
         panel_layout.setSpacing(0)
 
-        status_row = QWidget(panel)
-        status_layout = QHBoxLayout(status_row)
-        status_layout.setContentsMargins(0, 0, 0, 0)
-        status_layout.setSpacing(10)
-
-        self.status_dot = StatusDot(status_row)
-        status_layout.addWidget(self.status_dot, 0, Qt.AlignmentFlag.AlignTop)
-
-        text_box = QWidget(status_row)
-        text_layout = QVBoxLayout(text_box)
-        text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(3)
-
-        self.status_title = QLabel("Anki 连接中…", text_box)
-        title_font = QFont(fonts["button"])
-        title_font.setWeight(QFont.Weight.Medium)
-        self.status_title.setFont(title_font)
-        text_layout.addWidget(self.status_title)
-
-        self.status_detail = QLabel("正在检测 AnkiConnect…", text_box)
+        self.status_detail = QLabel(panel)
         self.status_detail.setObjectName("connectionDetail")
         self.status_detail.setFont(fonts["small"])
         self.status_detail.setWordWrap(True)
-        text_layout.addWidget(self.status_detail)
+        self.status_detail.setContentsMargins(12, 6, 12, 8)
+        panel_layout.addWidget(self.status_detail)
 
-        status_layout.addWidget(text_box, 1)
-        panel_layout.addWidget(status_row)
-
-        divider = QFrame(panel)
-        divider.setObjectName("divider")
-        divider.setFixedHeight(1)
-        panel_layout.addSpacing(12)
-        panel_layout.addWidget(divider)
-        panel_layout.addSpacing(8)
-
-        action_font = QFont(fonts["small"])
-        action_font.setWeight(QFont.Weight.Medium)
-
-        self.reconnect_button = QPushButton("↻  重新连接", panel)
-        self.reconnect_button.setObjectName("connectionPrimaryButton")
-        self.reconnect_button.setFont(action_font)
-        self.reconnect_button.setFixedHeight(36)
-        self.reconnect_button.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Fixed,
-        )
-        panel_layout.addWidget(self.reconnect_button)
-        panel_layout.addSpacing(6)
-
-        self.open_anki_button = QPushButton("▶  打开 Anki", panel)
-        self.open_anki_button.setObjectName("connectionSecondaryButton")
-        self.open_anki_button.setFont(action_font)
-        self.open_anki_button.setFixedHeight(36)
-        self.open_anki_button.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Fixed,
-        )
-        panel_layout.addWidget(self.open_anki_button)
+        action_font = QFont(fonts["button"])
+        self.open_anki_button = QPushButton("↗  打开 Anki", panel)
+        self.reconnect_button = QPushButton("↻  重新检测连接", panel)
+        for button in (self.open_anki_button, self.reconnect_button):
+            button.setObjectName("connectionMenuItem")
+            button.setFont(action_font)
+            button.setFixedHeight(40)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            panel_layout.addWidget(button)
 
         root.addWidget(panel)
 
@@ -378,36 +340,21 @@ class ConnectionPopover(QWidget):
 
     def set_connection(self, text: str, level: str) -> None:
         level = level if level in {"ok", "warn", "info"} else "info"
-        self.status_title.setText(text)
-        self.status_dot.set_level(level)
-        if level == "ok":
-            detail = "已通过 AnkiConnect 建立连接"
-            action_text = "↻  重新检测连接"
-            action_enabled = True
-            show_open_anki = False
-        elif level == "warn":
-            detail = (
-                "AnkiConnect 响应异常，请重新检测"
-                if "异常" in text
-                else "未检测到 AnkiConnect"
-            )
-            action_text = "↻  重新连接"
-            action_enabled = True
-            show_open_anki = True
-        else:
-            detail = (
-                "正在启动 Anki，稍后检测 AnkiConnect…"
-                if "启动" in text
-                else "正在检测 AnkiConnect…"
-            )
-            action_text = "↻  正在检测…"
-            action_enabled = False
-            show_open_anki = False
-
+        detail = "AnkiConnect 响应异常，请重新检测" if level == "warn" and "异常" in text else ""
         self.status_detail.setText(detail)
-        self.reconnect_button.setText(action_text)
-        self.reconnect_button.setEnabled(action_enabled)
-        self.open_anki_button.setVisible(show_open_anki)
+        self.status_detail.setVisible(bool(detail))
+        self.open_anki_button.setVisible(level == "warn")
+        self.reconnect_button.setEnabled(level != "info")
+        self.reconnect_button.setText(
+            ("正在启动 Anki…" if "启动" in text else "正在检测…")
+            if level == "info" else "↻  重新检测连接"
+        )
+        self._menu_layout.invalidate()
+        self._menu_layout.activate()
+        self.layout().invalidate()
+        self.adjustSize()
+        if self.isVisible():
+            self.show_anchored(self.parentWidget().connection_button)
 
     def show_anchored(self, anchor: QWidget) -> None:
         self.adjustSize()
@@ -468,6 +415,8 @@ class MainWindow(QMainWindow):
 
     def __init__(self, checker, state: dict, save_state: Callable[..., None], bundle_dir: str, executor=None, parent=None):
         super().__init__(parent)
+        # A combo rollout can finish after its owner hides and resurrect the popup.
+        QApplication.setEffectEnabled(Qt.UIEffect.UI_AnimateCombo, False)
         self.setWindowTitle(APP_TITLE)
         self.setMinimumSize(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         self._save_state = save_state
@@ -748,7 +697,9 @@ class MainWindow(QMainWindow):
 
     def _build_connection_popover(self) -> ConnectionPopover:
         popover = ConnectionPopover(self, self.fonts, self._bundle_dir)
+        popover.reconnect_button.clicked.connect(popover.hide)
         popover.reconnect_button.clicked.connect(self.controller.retry_connection)
+        popover.open_anki_button.clicked.connect(popover.hide)
         popover.open_anki_button.clicked.connect(self.open_anki)
         return popover
 
@@ -1040,7 +991,13 @@ class MainWindow(QMainWindow):
         rect = self.geometry()
         return f"{rect.width()}x{rect.height()}{rect.x():+d}{rect.y():+d}"
 
+    def hideEvent(self, event) -> None:
+        if hasattr(self, "deck_box"):
+            self.deck_box.hidePopup()
+        super().hideEvent(event)
+
     def closeEvent(self, event) -> None:
+        self.deck_box.hidePopup()
         self._closing = True
         try:
             self._persist_format_prompt()
