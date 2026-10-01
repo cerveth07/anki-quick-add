@@ -24,6 +24,7 @@ from ui.theme import application_stylesheet
 @dataclass
 class FakeConfig:
     deck_name: str = ""
+    note_type: str = "Basic"
 
 
 class FakeAdapter:
