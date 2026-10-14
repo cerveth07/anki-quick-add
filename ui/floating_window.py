@@ -424,6 +424,11 @@ class FloatingCapture(QObject):
     def enable(self):
         if self.closed:
             return
+        # The floating editor is deliberately text-only. Keep an image draft in
+        # the main window rather than silently submitting a text-only note.
+        if getattr(self.main, "_image_attachment", None) is not None:
+            self.main.set_status("⚠ 当前草稿含图片，请先在主窗口完成添加或移除图片", "warn")
+            return
         self.enabled = True
         self.main.prompt_popover.hide()
         self.main.connection_popover.hide()
