@@ -152,6 +152,21 @@ class FloatingTests(unittest.TestCase):
         self.assertIsNone(self.window.attachment_for_add())
         self.assertFalse(self.window.image_remove_button.isVisible())
 
+    def test_image_before_first_json_is_preserved(self):
+        self.floating.open_main()
+        image = QImage(22, 25, QImage.Format.Format_RGB32)
+        image.fill(QColor("#445566"))
+        APP.clipboard().setImage(image)
+        self.window.image_paste_button.click()
+        attachment = self.window.attachment_for_add()
+        self.assertIsNotNone(attachment)
+        self.window.paste_box.setPlainText(raw("海"))
+        APP.processEvents()
+        self.assertEqual(self.window.attachment_for_add(), attachment)
+        self.window.controller.add_clicked()
+        APP.processEvents()
+        self.assertEqual(self.checker.attachments, [attachment])
+
     def test_main_window_file_picker_imports_picture(self):
         self.floating.open_main()
         image = QImage(64, 40, QImage.Format.Format_RGB32)
