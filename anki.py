@@ -19,6 +19,7 @@ from typing import Any, Callable
 
 from card import CardModel
 from config import Config
+from image_attachment import ImageAttachment
 
 
 # --------------------------------------------------------------------------
@@ -55,13 +56,16 @@ def to_anki_html(text: str) -> str:
     return _MULTI_NEWLINE.sub("<br>", escaped)
 
 
-def build_note(config: Config, card: CardModel, deck_name: str | None = None) -> dict:
+def build_note(
+    config: Config, card: CardModel, deck_name: str | None = None,
+    attachment: ImageAttachment | None = None,
+) -> dict:
     """构造 AnkiConnect note 载荷。
 
     deck 只能来自本机：默认取配置，或用户在界面上手选（deck_name）。
     绝不接受输入 JSON 里的 deck 字段（§7.2）。
     """
-    return {
+    note = {
         "deckName": deck_name or config.deck_name,
         "modelName": config.note_type,
         "fields": {
@@ -71,6 +75,11 @@ def build_note(config: Config, card: CardModel, deck_name: str | None = None) ->
         "options": {"allowDuplicate": False},
         "tags": [],
     }
+    if attachment is not None:
+        # addNote imports media and appends its img tag to the configured Back.
+        # Do not hand-insert raw HTML into CardModel (the fields stay plain text).
+        note["picture"] = [attachment.picture(config.back_field)]
+    return note
 
 
 # --------------------------------------------------------------------------
@@ -243,10 +252,13 @@ class DuplicateChecker:
             return CheckResult("READY", "未发现重复（全库判重）")
         return CheckResult("DUPLICATE", f"Anki 中已存在「{card.front}」（全库判重，可能在别的牌组）")
 
-    def add(self, card: CardModel, deck_name: str | None = None) -> AddResult:
+    def add(
+        self, card: CardModel, deck_name: str | None = None,
+        attachment: ImageAttachment | None = None,
+    ) -> AddResult:
         """添加卡片。成功才允许调用方清空；任何失败路径都不清空。"""
         deck = deck_name or self.adapter.config.deck_name
-        note = build_note(self.adapter.config, card, deck_name)
+        note = build_note(self.adapter.config, card, deck_name, attachment)
         try:
             note_id = self.adapter.add_note(note)
         except AnkiOfflineError as exc:
