@@ -7,11 +7,14 @@ import os
 import re
 from typing import Callable
 
-from PySide6.QtCore import QPoint, QSignalBlocker, QSize, Qt, QTimer
+from PySide6.QtCore import QBuffer, QIODevice, QPoint, QSignalBlocker, QSize, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
     QFont,
     QIcon,
+    QImage,
+    QImageReader,
+    QPixmap,
     QKeySequence,
     QShortcut,
     QTextCharFormat,
@@ -40,7 +43,8 @@ from anki_launcher import (
     is_valid_anki_executable,
     launch_anki,
 )
-from controller import QuickAddController, short_deck
+from controller import QuickAddController, State, short_deck
+from image_attachment import ImageAttachment, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS
 from ui.floating_window import FloatingCapture
 from ui.qt_executor import QtThreadedExecutor
 from ui.theme import (
@@ -448,6 +452,7 @@ class MainWindow(QMainWindow):
         else:
             self.format_prompt = FORMAT_PROMPT
         self._programmatic = 0
+        self._image_attachment: ImageAttachment | None = None
         self._format_prompt_save_timer = QTimer(self)
         self._format_prompt_save_timer.setSingleShot(True)
         self._format_prompt_save_timer.timeout.connect(self._persist_format_prompt)
@@ -557,6 +562,28 @@ class MainWindow(QMainWindow):
         preview_editable.setFont(self.fonts["small"])
         preview_head_layout.addWidget(preview_editable, 0, Qt.AlignmentFlag.AlignVCenter)
         preview_head_layout.addStretch(1)
+
+        # Compact toolbar: an optional thumbnail without stealing Back-editor height.
+        self.image_thumb = QLabel(preview_head)
+        self.image_thumb.setFixedSize(32, 32)
+        self.image_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_thumb.setVisible(False)
+        preview_head_layout.addWidget(self.image_thumb, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.image_paste_button = QPushButton("粘贴图片", preview_head)
+        self.image_file_button = QPushButton("选择图片", preview_head)
+        self.image_remove_button = QPushButton("移除", preview_head)
+        for button in (self.image_paste_button, self.image_file_button, self.image_remove_button):
+            button.setObjectName("secondaryButton")
+            button.setFont(self.fonts["button"])
+            button.setFixedHeight(32)
+            preview_head_layout.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.image_remove_button.setVisible(False)
+        self.image_paste_button.setToolTip("从剪贴板粘贴图片（不会替换词卡文本）")
+        self.image_file_button.setToolTip("选择本地图片文件")
+        self.image_remove_button.setToolTip("移除图片附件，不清空文字草稿")
+        self.image_paste_button.clicked.connect(self._paste_image_from_clipboard)
+        self.image_file_button.clicked.connect(self._choose_image)
+        self.image_remove_button.clicked.connect(self._clear_image)
         outer.addWidget(preview_head)
         outer.addSpacing(GAP_TIGHT)
 
@@ -597,7 +624,7 @@ class MainWindow(QMainWindow):
         outer.addSpacing(GAP_SECTION)
         self._build_action_row(outer, root)
 
-        self._wire_editor(self.paste_box, self.controller.paste_changed)
+        self._wire_editor(self.paste_box, self._on_paste_changed)
         self._wire_editor(self.front_box, self.controller.front_changed, self._retag_front)
         self._wire_editor(self.back_box, self.controller.back_changed, self._retag_back)
 
@@ -887,6 +914,98 @@ class MainWindow(QMainWindow):
         text = self.format_prompt_box.toPlainText().strip() or FORMAT_PROMPT
         self._copy_to_clipboard(text, "✓ 已复制格式要求：直接粘给 ChatGPT 即可")
 
+    # ------------------------------------------------------------------ image attachments
+    def _on_paste_changed(self, raw: str) -> None:
+        # Preserve image-before-JSON, but never attach a previous image to a
+        # newly pasted draft. Direct Front/Back edits do not clear attachments.
+        previous = self.controller.paste_text
+        if self._image_attachment is not None and previous.strip() and raw != previous:
+            self._clear_image()
+        self.controller.paste_changed(raw)
+
+    def _refresh_image_controls(self, preview: QImage | None = None) -> None:
+        attached = self._image_attachment is not None
+        if attached and preview is not None:
+            pixmap = QPixmap.fromImage(preview)
+            self.image_thumb.setPixmap(pixmap.scaled(
+                QSize(32, 32), Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ))
+        if not attached:
+            self.image_thumb.clear()
+        self.image_thumb.setVisible(attached)
+        self.image_remove_button.setVisible(attached)
+        if attached:
+            attachment = self._image_attachment
+            self.image_thumb.setToolTip(
+                f"图片已附加到背面：{attachment.width}×{attachment.height} · "
+                f"{len(attachment.png) / 1024:.0f} KB"
+            )
+
+    def _clear_image(self) -> None:
+        self._image_attachment = None
+        self._refresh_image_controls()
+
+    def _attach_image(self, image: QImage) -> None:
+        if image.isNull():
+            raise ValueError("剪贴板或文件中没有可用图片")
+        width, height = image.width(), image.height()
+        if width <= 0 or height <= 0 or width * height > MAX_IMAGE_PIXELS:
+            raise ValueError("图片像素数量超过限制（2500 万像素）")
+        buffer = QBuffer()
+        if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
+            raise ValueError("无法编码图片")
+        if not image.save(buffer, "PNG"):
+            raise ValueError("图片转换为 PNG 失败")
+        data = bytes(buffer.data())
+        if len(data) > MAX_IMAGE_BYTES:
+            raise ValueError("图片过大（PNG 超过 10 MB）")
+        self._image_attachment = ImageAttachment(data, width, height)
+        self._refresh_image_controls(image)
+        self.set_status("✓ 图片已附加到背面，添加到 Anki 时一并提交", "ok")
+
+    def _paste_image_from_clipboard(self) -> None:
+        if self.controller.state is State.ADDING:
+            return
+        clipboard = QApplication.clipboard()
+        if not clipboard.mimeData().hasImage():
+            self.set_status("⚠ 剪贴板没有可用的图片，请先点击 ChatGPT 图片的复制按钮", "warn")
+            return
+        try:
+            self._attach_image(clipboard.image())
+        except (ValueError, OSError) as exc:
+            self.set_status(f"⚠ 图片导入失败：{exc}", "warn")
+
+    def _choose_image(self) -> None:
+        if self.controller.state is State.ADDING:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择卡片配图", "",
+            "图片 (*.png *.jpg *.jpeg *.webp *.bmp *.gif);;所有文件 (*)",
+        )
+        if not path:
+            return
+        try:
+            if os.path.getsize(path) > 15 * 1024 * 1024:
+                raise ValueError("图片源文件超过 15 MB")
+            reader = QImageReader(path)
+            reader.setAutoTransform(True)
+            size = reader.size()
+            if size.isValid() and size.width() * size.height() > MAX_IMAGE_PIXELS:
+                raise ValueError("图片像素数量超过限制（2500 万像素）")
+            image = reader.read()
+            if image.isNull():
+                raise ValueError(reader.errorString() or "不支持此图片格式")
+            self._attach_image(image)
+        except (ValueError, OSError) as exc:
+            self.set_status(f"⚠ 图片导入失败：{exc}", "warn")
+
+    def attachment_for_add(self) -> ImageAttachment | None:
+        # The controller is shared with floating mode, which remains text-only.
+        if self.floating is not None and self.floating.enabled:
+            return None
+        return self._image_attachment
+
     def set_status(self, text: str, level: str = "info") -> None:
         self.status_label.setText(text)
         self.status_label.setStyleSheet(f"color: {WARN if level == 'warn' else MUTED if level == 'info' else '#36A86B'};")
@@ -916,6 +1035,7 @@ class MainWindow(QMainWindow):
     def clear_card(self) -> None:
         self._set_text(self.paste_box, "")
         self.clear_preview()
+        self._clear_image()
 
     def _show_hint(self, text: str) -> None:
         self.hint_label.setText(text)
@@ -954,6 +1074,8 @@ class MainWindow(QMainWindow):
 
     def set_enabled(self, add_enabled: bool, editable: bool) -> None:
         self.add_button.setEnabled(add_enabled)
+        for button in (self.image_paste_button, self.image_file_button, self.image_remove_button):
+            button.setEnabled(editable)
         for editor in (self.paste_box, self.front_box, self.back_box):
             editor.setReadOnly(not editable)
         self.deck_box.setEnabled(editable)
