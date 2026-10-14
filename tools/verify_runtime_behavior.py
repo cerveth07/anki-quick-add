@@ -234,7 +234,7 @@ def test_optional_picture_payload_and_text_only_compatibility() -> None:
     assert checker.add(card, "Default", attachment=attachment).state == "ADDED"
     note = captured[-1][1]["note"]
     assert note["fields"]["Front"] == "振り向く"
-    assert note["fields"]["Back"] == "ふりむく<br>回头"
+    assert note["fields"]["Back"] == "ふりむく<br>回头<br>"
     assert len(note["picture"]) == 1
     assert note["picture"][0]["fields"] == ["Back"]
     assert note["picture"][0]["filename"] == attachment.filename
