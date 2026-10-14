@@ -25,7 +25,7 @@ def main() -> None:
     window.controller.startup()
     window.resize(980, 740)
     window.show()
-    window.paste_box.setPlainText(raw("振り向く", "ふりむく\\n回头；转身回望"))
+    window.paste_box.setPlainText(raw("振り向く", "ふりむく\n回头；转身回望"))
     image = QImage(480, 320, QImage.Format.Format_RGB32)
     image.fill(QColor("#B8C7DF"))
     APP.clipboard().setImage(image)
