@@ -140,7 +140,7 @@ class FloatingTests(unittest.TestCase):
         self.window.image_paste_button.click()
         attached = self.window.attachment_for_add()
         self.assertIsNotNone(attached)
-        self.assertTrue(attached.png.startswith(b"\\x89PNG"))
+        self.assertTrue(attached.png.startswith(b"\x89PNG"))
         self.assertTrue(self.window.image_thumb.isVisible())
         self.assertTrue(self.window.image_remove_button.isVisible())
         self.window.controller.add_clicked()
