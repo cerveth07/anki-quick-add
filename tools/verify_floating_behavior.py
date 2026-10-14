@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QVBoxLayout, QWidget
 
@@ -39,6 +40,7 @@ class FakeChecker:
         self.adapter = self
         self.config = CONFIG
         self.added = []
+        self.attachments = []
         self.offline = False
         self.fail_add = False
 
@@ -54,9 +56,10 @@ class FakeChecker:
             return CheckResult("DUPLICATE", "该词已存在")
         return CheckResult("READY", "可添加")
 
-    def add(self, card, deck):
+    def add(self, card, deck, attachment=None):
         if self.fail_add:
             return AddResult("ERROR", "添加失败", deck=deck)
+        self.attachments.append(attachment)
         self.added.append((card.front, deck))
         return AddResult("ADDED", "添加成功", note_id=len(self.added), deck=deck)
 
@@ -126,6 +129,77 @@ class FloatingTests(unittest.TestCase):
         self.floating.clipboard.setText(value)
         self.floating.read_clipboard()
         APP.processEvents()
+
+    def test_main_window_image_clipboard_and_submit(self):
+        self.floating.open_main()
+        self.window.paste_box.setPlainText(raw("振り向く"))
+        APP.processEvents()
+        image = QImage(40, 30, QImage.Format.Format_RGB32)
+        image.fill(QColor("#AABBCC"))
+        APP.clipboard().setImage(image)
+        self.window.image_paste_button.click()
+        attached = self.window.attachment_for_add()
+        self.assertIsNotNone(attached)
+        self.assertTrue(attached.png.startswith(b"\\x89PNG"))
+        self.assertTrue(self.window.image_thumb.isVisible())
+        self.assertTrue(self.window.image_remove_button.isVisible())
+        self.window.controller.add_clicked()
+        APP.processEvents()
+        self.assertEqual(self.checker.added, [("振り向く", "日语")])
+        self.assertEqual(self.checker.attachments, [attached])
+        self.assertIsNone(self.window.attachment_for_add())
+        self.assertFalse(self.window.image_remove_button.isVisible())
+
+    def test_image_draft_blocks_floating_mode_and_keeps_content(self):
+        self.floating.open_main()
+        self.window.paste_box.setPlainText(raw("山"))
+        image = QImage(30, 30, QImage.Format.Format_RGB32)
+        image.fill(QColor("#FFFFFF"))
+        APP.clipboard().setImage(image)
+        self.window.image_paste_button.click()
+        self.assertIsNotNone(self.window.attachment_for_add())
+        self.floating.enable()
+        self.assertFalse(self.floating.enabled)
+        self.assertTrue(self.window.isVisible())
+        self.assertIsNotNone(self.window.attachment_for_add())
+        self.window.image_remove_button.click()
+        self.assertIsNone(self.window.attachment_for_add())
+        self.floating.enable()
+        self.assertTrue(self.floating.enabled)
+
+    def test_new_json_draft_clears_old_picture(self):
+        self.floating.open_main()
+        self.window.paste_box.setPlainText(raw("猫"))
+        image = QImage(24, 24, QImage.Format.Format_RGB32)
+        image.fill(QColor("#112233"))
+        APP.clipboard().setImage(image)
+        self.window.image_paste_button.click()
+        self.assertIsNotNone(self.window.attachment_for_add())
+        self.window.paste_box.setPlainText(raw("犬"))
+        self.assertIsNone(self.window.attachment_for_add())
+
+    def test_image_add_failure_keeps_attachment_for_retry(self):
+        self.floating.open_main()
+        self.window.paste_box.setPlainText(raw("森"))
+        image = QImage(28, 28, QImage.Format.Format_RGB32)
+        image.fill(QColor("#345678"))
+        APP.clipboard().setImage(image)
+        self.window.image_paste_button.click()
+        attachment = self.window.attachment_for_add()
+        self.checker.fail_add = True
+        self.window.controller.add_clicked()
+        APP.processEvents()
+        self.assertEqual(self.window.controller.state, State.ERROR)
+        self.assertEqual(self.window.attachment_for_add(), attachment)
+        self.assertEqual(self.checker.added, [])
+        self.checker.fail_add = False
+        self.window.controller.add_clicked()  # Retry must re-check before sending.
+        APP.processEvents()
+        self.assertEqual(self.window.controller.state, State.READY)
+        self.window.controller.add_clicked()
+        APP.processEvents()
+        self.assertEqual(self.checker.attachments, [attachment])
+        self.assertIsNone(self.window.attachment_for_add())
 
     def test_capture_while_main_hidden_requires_confirmation(self):
         self.copy(raw())
