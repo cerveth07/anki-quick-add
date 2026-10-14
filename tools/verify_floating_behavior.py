@@ -13,13 +13,16 @@ sys.path.insert(0, str(ROOT))
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLineEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QVBoxLayout, QWidget
 
 from anki import AddResult, AnkiOfflineError, Capabilities, CheckResult
 from config import Config
 from controller import State
 from ui.main_window import MainWindow
-from ui.theme import application_stylesheet
+from ui.theme import (
+    FLOAT_CONTROL_SIZE, FLOAT_EDITOR_SIZE, FLOAT_META_SIZE,
+    FLOAT_TITLE_SIZE, application_stylesheet,
+)
 
 
 APP = QApplication.instance() or QApplication([])
@@ -133,6 +136,40 @@ class FloatingTests(unittest.TestCase):
         self.assertEqual(self.checker.added, [])
         self.assertTrue(self.floating.panel.add_button.isEnabled())
         self.assertGreaterEqual(self.floating.panel.back_box.height(), 100)
+
+    def test_compact_panel_type_scale_and_matched_window_controls(self):
+        panel = self.floating.panel
+        self.copy(raw())
+        self.assertEqual((panel.width(), panel.height()), (360, 510))
+        title = panel.findChild(QLabel, "floatTitle")
+        self.assertIsNotNone(title)
+        self.assertEqual(title.font().pixelSize(), FLOAT_TITLE_SIZE)
+        self.assertEqual(panel.auto_add_switch.font().pixelSize(), FLOAT_CONTROL_SIZE)
+        self.assertEqual(panel.front_box.font().pixelSize(), FLOAT_EDITOR_SIZE)
+        self.assertEqual(panel.back_box.font().pixelSize(), FLOAT_EDITOR_SIZE)
+        self.assertEqual(panel.status_label.font().pixelSize(), FLOAT_META_SIZE)
+        self.assertEqual((FLOAT_TITLE_SIZE, FLOAT_CONTROL_SIZE, FLOAT_META_SIZE, FLOAT_EDITOR_SIZE),
+                         (16, 14, 12, 14))
+        self.assertFalse(panel.main_button.icon().isNull())
+        self.assertFalse(panel.collapse_button.icon().isNull())
+        self.assertEqual(panel.main_button.size(), panel.collapse_button.size())
+        self.assertEqual(panel.main_button.iconSize(), panel.collapse_button.iconSize())
+        self.assertEqual(panel.main_button.accessibleName(), "返回主窗口")
+        self.assertEqual(panel.collapse_button.accessibleName(), "收起为悬浮球")
+        self.assertFalse(panel.retry_button.isVisible())
+
+    def test_compact_panel_window_actions_keep_floating_session(self):
+        self.copy(raw())
+        panel = self.floating.panel
+        panel.collapse_button.click()
+        self.assertFalse(panel.isVisible())
+        self.assertTrue(self.floating.orb.isVisible())
+        self.assertTrue(self.floating.poll_timer.isActive())
+        self.floating.toggle_preview()
+        self.assertTrue(panel.isVisible())
+        panel.main_button.click()
+        self.assertFalse(self.floating.enabled)
+        self.assertTrue(self.window.isVisible())
 
     def test_unrelated_clipboard_and_semantic_repeats_are_ignored(self):
         self.copy("ordinary text")
