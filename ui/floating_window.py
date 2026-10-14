@@ -5,8 +5,8 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QPoint, QRectF, QSignalBlocker, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen
+from PySide6.QtCore import QObject, QPoint, QRectF, QSignalBlocker, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFrame, QGraphicsDropShadowEffect, QHBoxLayout,
     QLabel, QMenu, QPushButton, QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
@@ -35,6 +35,9 @@ QComboBox QAbstractItemView { background: #FFFFFF; color: #253248; border: 1px s
 QPushButton { background: transparent; border: none; border-radius: 7px; padding: 0px 10px; min-height: 0px; }
 QPushButton#floatAdd, QPushButton#floatIgnore { min-height: 36px; max-height: 36px; }
 QPushButton:hover { background: #EAF0FA; }
+QPushButton#floatWindowControl { background: transparent; border: none; padding: 0px; }
+QPushButton#floatWindowControl:hover { background: #EAF0FA; }
+QPushButton#floatWindowControl:pressed { background: #DCE7F6; }
 QPushButton#floatRetry { color: #367DEB; padding: 0px 6px; }
 QPushButton:disabled { color: #8191A8; }
 QPushButton#floatAdd { color: white; background: #367DEB; }
@@ -203,30 +206,49 @@ class FloatingPanel(QWidget):
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(8)
         header = QHBoxLayout()
+        header.setSpacing(4)
         title = QLabel("快速制卡")
         title.setObjectName("floatTitle")
         title.setFont(pixel_font(owner.main.fonts["cn_medium"], FLOAT_TITLE_SIZE))
         header.addWidget(title)
         self.auto_add_switch = QCheckBox("自动添加")
         self.auto_add_switch.setObjectName("floatAutoAdd")
-        self.auto_add_switch.setFont(pixel_font(owner.main.fonts["cn"], FLOAT_META_SIZE))
+        self.auto_add_switch.setFont(pixel_font(owner.main.fonts["cn"], FLOAT_CONTROL_SIZE))
         self.auto_add_switch.setAccessibleName("自动添加")
         self.auto_add_switch.setMinimumHeight(28)
         self.auto_add_switch.setCursor(Qt.CursorShape.PointingHandCursor)
         self.auto_add_switch.setToolTip("新复制的词卡通过校验和查重后直接加入当前牌组，不弹出预览或成功提示")
         self.auto_add_switch.toggled.connect(owner.set_auto_add)
+        header.addSpacing(6)
         header.addWidget(self.auto_add_switch)
         header.addStretch()
-        self.main_button = QPushButton("↗")
+
+        # Use one icon family and identical hit targets for both window actions.
+        # The SVG assets are bundled by tools/AnkiQuickAdd-pyside6.spec.
+        icon_dir = Path(__file__).resolve().parent / "icons"
+        self.main_button = QPushButton()
+        self.main_button.setObjectName("floatWindowControl")
         self.main_button.setFixedSize(28, 28)
-        self.main_button.setToolTip("打开主窗口")
-        self.main_button.setAccessibleName("打开主窗口")
+        self.main_button.setIcon(QIcon(str(icon_dir / "floating-main-window.svg")))
+        self.main_button.setIconSize(QSize(16, 16))
+        if self.main_button.icon().isNull():
+            self.main_button.setText("□")
+        self.main_button.setToolTip("返回主窗口")
+        self.main_button.setAccessibleName("返回主窗口")
+        self.main_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.main_button.clicked.connect(owner.open_main)
         header.addWidget(self.main_button)
-        self.collapse_button = QPushButton("−")
+
+        self.collapse_button = QPushButton()
+        self.collapse_button.setObjectName("floatWindowControl")
         self.collapse_button.setFixedSize(28, 28)
-        self.collapse_button.setToolTip("收起预览，继续监听")
-        self.collapse_button.setAccessibleName("收起预览")
+        self.collapse_button.setIcon(QIcon(str(icon_dir / "floating-collapse.svg")))
+        self.collapse_button.setIconSize(QSize(16, 16))
+        if self.collapse_button.icon().isNull():
+            self.collapse_button.setText("−")
+        self.collapse_button.setToolTip("收起为悬浮球，继续监听")
+        self.collapse_button.setAccessibleName("收起为悬浮球")
+        self.collapse_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.collapse_button.clicked.connect(self.hide)
         header.addWidget(self.collapse_button)
         layout.addLayout(header)
@@ -240,6 +262,7 @@ class FloatingPanel(QWidget):
         self.deck_box = QComboBox()
         self.deck_box.setFont(pixel_font(owner.main.fonts["cn"], FLOAT_CONTROL_SIZE))
         self.deck_box.setAccessibleName("目标牌组")
+        self.deck_box.setFixedHeight(36)
         self.deck_box.currentTextChanged.connect(owner.select_deck)
         row.addWidget(self.deck_box, 1)
         layout.addLayout(row)
@@ -257,7 +280,7 @@ class FloatingPanel(QWidget):
         front_font = pixel_font(owner.main.fonts["front"], FLOAT_EDITOR_SIZE)
         front_font.setVariableAxis(QFont.Tag("wght"), 400)
         self.front_box.setFont(front_font)
-        self.front_box.setFixedHeight(76)
+        self.front_box.setFixedHeight(64)
         self.front_box.setPlaceholderText("输入正面内容")
         self.front_box.setAccessibleName("卡片正面")
         self.front_box.textChanged.connect(lambda: owner.edit_front(self.front_box.toPlainText()))
@@ -297,6 +320,7 @@ class FloatingPanel(QWidget):
         self.add_button.setObjectName("floatAdd")
         self.add_button.setFont(pixel_font(owner.main.fonts["cn_medium"], FLOAT_CONTROL_SIZE))
         self.add_button.clicked.connect(owner.submit)
+        self.add_button.setMinimumWidth(122)
         self.ignore_button.setFont(pixel_font(owner.main.fonts["cn"], FLOAT_CONTROL_SIZE))
         for button in (self.ignore_button, self.add_button):
             button.setFixedHeight(36)
@@ -496,6 +520,9 @@ class FloatingCapture(QObject):
         self.panel.deck_box.setEnabled(editing)
         self.panel.ignore_button.setEnabled(editing and self.active is not None)
         self.panel.retry_button.setEnabled(editing)
+        # Keep reconnect available on failures, not beside successful states.
+        needs_retry = ctl.state in (State.ERROR, State.ANKI_OFFLINE) or self.main.connection_button.property("level") == "warn"
+        self.panel.retry_button.setVisible(needs_retry)
         self.panel.add_button.setEnabled(ctl.state is State.READY and self.main.add_button.isEnabled())
         self.panel.add_button.setText("正在添加…" if not editing else "添加到 Anki")
         if self.auto_add:
