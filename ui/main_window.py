@@ -927,7 +927,10 @@ class MainWindow(QMainWindow):
         # Preserve image-before-JSON, but never attach a previous image to a
         # newly pasted draft. Direct Front/Back edits do not clear attachments.
         previous = self.controller.paste_text
-        if self._image_attachment is not None and previous.strip() and raw != previous:
+        had_text_draft = bool(
+            self.controller.card.front.strip() or self.controller.card.back.strip()
+        )
+        if self._image_attachment is not None and raw != previous and (previous.strip() or had_text_draft):
             self._clear_image()
         self.controller.paste_changed(raw)
 
