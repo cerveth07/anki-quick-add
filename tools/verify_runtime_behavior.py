@@ -6,6 +6,7 @@ workflow still launches the real PySide6 UI and captures screenshots first.
 """
 from __future__ import annotations
 
+import base64
 import sys
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from anki import (
 )
 from card import CardModel
 from config import Config
+from image_attachment import ImageAttachment
 from controller import QuickAddController, State
 
 
@@ -209,12 +211,45 @@ def test_null_add_then_disconnect_is_offline_not_generic_error() -> None:
     assert result.state == "OFFLINE", result
 
 
+def test_optional_picture_payload_and_text_only_compatibility() -> None:
+    # A known minimal PNG fixture exercises the Base64 media transport.
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l2sAAAAASUVORK5CYII="
+    )
+    attachment = ImageAttachment(png, 1, 1)
+    captured = []
+
+    def transport(action: str, **params):
+        captured.append((action, params))
+        if action == "canAddNotes":
+            return [True]
+        if action == "addNote":
+            return 123456789
+        raise AssertionError(action)
+
+    checker = DuplicateChecker(AnkiAdapter(CONFIG, transport=transport))
+    card = CardModel(front="振り向く", back="ふりむく\n回头")
+    assert checker.check(card, "Default").state == "READY"
+    assert "picture" not in captured[-1][1]["notes"][0]
+    assert checker.add(card, "Default", attachment=attachment).state == "ADDED"
+    note = captured[-1][1]["note"]
+    assert note["fields"]["Front"] == "振り向く"
+    assert note["fields"]["Back"] == "ふりむく<br>回头"
+    assert len(note["picture"]) == 1
+    assert note["picture"][0]["fields"] == ["Back"]
+    assert note["picture"][0]["filename"] == attachment.filename
+    assert base64.b64decode(note["picture"][0]["data"]) == png
+    assert checker.add(card, "Default").state == "ADDED"
+    assert "picture" not in captured[-1][1]["note"]
+
+
 TESTS = (
     test_offline_result_updates_connection_badge,
     test_clear_is_blocked_while_adding,
     test_stale_capability_result_cannot_overwrite_newer_state,
     test_invalid_deck_still_populates_recovery_choices,
     test_null_add_then_disconnect_is_offline_not_generic_error,
+    test_optional_picture_payload_and_text_only_compatibility,
 )
 
 
