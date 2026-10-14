@@ -76,8 +76,10 @@ def build_note(
         "tags": [],
     }
     if attachment is not None:
-        # addNote imports media and appends its img tag to the configured Back.
-        # Do not hand-insert raw HTML into CardModel (the fields stay plain text).
+        # AnkiConnect appends the img tag to Back. Insert a line break first so
+        # that the illustration appears below the explanation/usage examples.
+        # CardModel itself continues to hold plain text only.
+        note["fields"][config.back_field] += "<br>"
         note["picture"] = [attachment.picture(config.back_field)]
     return note
 
