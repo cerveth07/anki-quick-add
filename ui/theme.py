@@ -56,10 +56,10 @@ PROMPT_BG_PRESSED = "#ECF3FF"
 PROMPT_BORDER = "#CFE0FA"
 
 # Floating panel typography (logical pixels) -------------------------------
-FLOAT_TITLE_SIZE = 18
-FLOAT_CONTROL_SIZE = 13
+FLOAT_TITLE_SIZE = 16
+FLOAT_CONTROL_SIZE = 14
 FLOAT_META_SIZE = 12
-FLOAT_EDITOR_SIZE = 16
+FLOAT_EDITOR_SIZE = 14
 
 # Layout ------------------------------------------------------------------
 PAGE_SIDE = 30
