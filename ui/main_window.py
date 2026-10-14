@@ -569,7 +569,8 @@ class MainWindow(QMainWindow):
         self.image_thumb.setObjectName("imagePreviewButton")
         self.image_thumb.setFixedSize(32, 32)
         self.image_thumb.setStyleSheet(
-            "QPushButton#imagePreviewButton { background: transparent; border: none; padding: 0px; }"
+            "QPushButton#imagePreviewButton { background: transparent; border: none; padding: 0px;"
+            " min-height: 32px; max-height: 32px; min-width: 32px; max-width: 32px; }"
             "QPushButton#imagePreviewButton:hover { background: #EDF2FB; border-radius: 5px; }"
         )
         self.image_thumb.setAccessibleName("查看图片大图")
@@ -583,6 +584,11 @@ class MainWindow(QMainWindow):
         for button in (self.image_paste_button, self.image_file_button, self.image_remove_button):
             button.setObjectName("secondaryButton")
             button.setFont(self.fonts["button"])
+            # The application-wide QPushButton rule has min-height: 38px.
+            # Override it locally so the compact preview toolbar stays 32px.
+            button.setStyleSheet(
+                "QPushButton { min-height: 32px; max-height: 32px; padding: 0px 9px; }"
+            )
             button.setFixedHeight(32)
             preview_head_layout.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
         self.image_remove_button.setVisible(False)
