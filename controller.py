@@ -346,10 +346,17 @@ class QuickAddController:
             return
         self._invalidate()
         card = snapshot(self.card)
+        # Attachment is captured on the UI thread with the text snapshot.
+        # Floating capture remains text-only; FakeChecker stays compatible.
+        get_attachment = getattr(self.view, "attachment_for_add", None)
+        attachment = get_attachment() if callable(get_attachment) else None
+        deck = self.deck
         self._set_state(State.ADDING, "正在加入…")
 
         def job():
-            return self.checker.add(card, self.deck)
+            if attachment is not None:
+                return self.checker.add(card, deck, attachment=attachment)
+            return self.checker.add(card, deck)
 
         def done(result, error) -> None:
             if error is not None:
