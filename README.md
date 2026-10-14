@@ -114,6 +114,7 @@ python app.py
 python tools/verify_runtime_behavior.py
 python tools/verify_floating_behavior.py
 python tools/capture_floating_ui.py
+python tools/capture_image_ui.py
 ```
 
 如需构建 Windows 发布包：
