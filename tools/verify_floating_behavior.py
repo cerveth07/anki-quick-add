@@ -5,7 +5,9 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -149,6 +151,23 @@ class FloatingTests(unittest.TestCase):
         self.assertEqual(self.checker.attachments, [attached])
         self.assertIsNone(self.window.attachment_for_add())
         self.assertFalse(self.window.image_remove_button.isVisible())
+
+    def test_main_window_file_picker_imports_picture(self):
+        self.floating.open_main()
+        image = QImage(64, 40, QImage.Format.Format_RGB32)
+        image.fill(QColor("#00AABB"))
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "sample.png")
+            self.assertTrue(image.save(path, "PNG"))
+            with patch("ui.main_window.QFileDialog.getOpenFileName", return_value=(path, "图片")):
+                self.window.image_file_button.click()
+        attachment = self.window.attachment_for_add()
+        self.assertIsNotNone(attachment)
+        self.assertEqual((attachment.width, attachment.height), (64, 40))
+        self.assertEqual(attachment.filename[:4], "aqa_")
+        self.assertFalse(self.window.image_thumb.icon().isNull())
+        self.window.image_remove_button.click()
+        self.assertIsNone(self.window.attachment_for_add())
 
     def test_image_draft_blocks_floating_mode_and_keeps_content(self):
         self.floating.open_main()
