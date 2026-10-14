@@ -23,6 +23,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QFileDialog,
     QFrame,
     QGraphicsDropShadowEffect,
@@ -564,9 +565,16 @@ class MainWindow(QMainWindow):
         preview_head_layout.addStretch(1)
 
         # Compact toolbar: an optional thumbnail without stealing Back-editor height.
-        self.image_thumb = QLabel(preview_head)
+        self.image_thumb = QPushButton(preview_head)
+        self.image_thumb.setObjectName("imagePreviewButton")
         self.image_thumb.setFixedSize(32, 32)
-        self.image_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_thumb.setStyleSheet(
+            "QPushButton#imagePreviewButton { background: transparent; border: none; padding: 0px; }"
+            "QPushButton#imagePreviewButton:hover { background: #EDF2FB; border-radius: 5px; }"
+        )
+        self.image_thumb.setAccessibleName("查看图片大图")
+        self.image_thumb.setToolTip("点击查看图片大图")
+        self.image_thumb.clicked.connect(self._show_image_preview)
         self.image_thumb.setVisible(False)
         preview_head_layout.addWidget(self.image_thumb, 0, Qt.AlignmentFlag.AlignVCenter)
         self.image_paste_button = QPushButton("粘贴图片", preview_head)
@@ -927,12 +935,10 @@ class MainWindow(QMainWindow):
         attached = self._image_attachment is not None
         if attached and preview is not None:
             pixmap = QPixmap.fromImage(preview)
-            self.image_thumb.setPixmap(pixmap.scaled(
-                QSize(32, 32), Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            ))
+            self.image_thumb.setIcon(QIcon(pixmap))
+            self.image_thumb.setIconSize(QSize(30, 30))
         if not attached:
-            self.image_thumb.clear()
+            self.image_thumb.setIcon(QIcon())
         self.image_thumb.setVisible(attached)
         self.image_remove_button.setVisible(attached)
         if attached:
@@ -941,6 +947,28 @@ class MainWindow(QMainWindow):
                 f"图片已附加到背面：{attachment.width}×{attachment.height} · "
                 f"{len(attachment.png) / 1024:.0f} KB"
             )
+
+    def _show_image_preview(self) -> None:
+        if self._image_attachment is None:
+            return
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(self._image_attachment.png, "PNG"):
+            self.set_status("⚠ 图片预览失败：图片数据无法解码", "warn")
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("卡片图片预览")
+        area = QApplication.primaryScreen().availableGeometry()
+        target = QSize(min(680, int(area.width() * 0.8)), min(460, int(area.height() * 0.7)))
+        label = QLabel(dialog)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setPixmap(pixmap.scaled(
+            target, Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ))
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.addWidget(label)
+        dialog.exec()
 
     def _clear_image(self) -> None:
         self._image_attachment = None
