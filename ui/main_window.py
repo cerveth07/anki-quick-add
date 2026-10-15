@@ -518,8 +518,10 @@ class MainWindow(QMainWindow):
         self.paste_title.setFont(self.fonts["cn_medium"])
         header_layout.addWidget(self.paste_title, 1, Qt.AlignmentFlag.AlignVCenter)
         icon_dir = os.path.join(self._bundle_dir, "ui", "icons")
+        toolbar_font = QFont(self.fonts["button"])
+        toolbar_font.setPixelSize(14)
         self.format_button = PromptButton(
-            "制卡提示词", self.fonts["button"],
+            "制卡提示词", toolbar_font,
             os.path.join(icon_dir, "chevron-down-muted.svg"),
             os.path.join(icon_dir, "chevron-up-muted.svg"), header,
         )
@@ -529,7 +531,7 @@ class MainWindow(QMainWindow):
 
         self.floating_button = QPushButton("悬浮制卡", header)
         self.floating_button.setObjectName("floatingModeButton")
-        self.floating_button.setFont(self.fonts["button"])
+        self.floating_button.setFont(toolbar_font)
         self.floating_button.setFixedHeight(36)
         self.floating_button.setIcon(QIcon(os.path.join(icon_dir, "floating-mode.svg")))
         self.floating_button.setIconSize(QSize(16, 16))
@@ -605,7 +607,7 @@ class MainWindow(QMainWindow):
         # Main segment: paste immediately. Arrow: choose an image file instead.
         self.image_remove_button = QPushButton("移除", preview_head)
         self.image_remove_button.setObjectName("imageRemoveAction")
-        self.image_remove_button.setFont(self.fonts["button"])
+        self.image_remove_button.setFont(toolbar_font)
         self.image_remove_button.setFixedHeight(32)
         self.image_remove_button.setToolTip("移除图片附件，不清空文字草稿")
         self.image_remove_button.clicked.connect(self._clear_image)
@@ -622,7 +624,7 @@ class MainWindow(QMainWindow):
         icon_dir = os.path.join(self._bundle_dir, "ui", "icons")
         self.image_paste_button = QPushButton("粘贴图片", self.image_action_group)
         self.image_paste_button.setObjectName("imageSplitPaste")
-        self.image_paste_button.setFont(self.fonts["button"])
+        self.image_paste_button.setFont(toolbar_font)
         self.image_paste_button.setIcon(QIcon(os.path.join(icon_dir, "clipboard-muted.svg")))
         self.image_paste_button.setIconSize(QSize(16, 16))
         self.image_paste_button.setFixedHeight(34)
