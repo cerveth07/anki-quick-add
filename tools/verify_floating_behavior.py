@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT))
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QToolButton, QVBoxLayout, QWidget
 
 from anki import AddResult, AnkiOfflineError, Capabilities, CheckResult
 from config import Config
@@ -177,6 +177,48 @@ class FloatingTests(unittest.TestCase):
         popup.hide()
         self.assertFalse(popup.isVisible())
 
+    def test_main_toolbar_split_button_and_prompt_visual_contract(self):
+        self.floating.open_main()
+        window = self.window
+        window.resize(980, 740)
+        APP.processEvents()
+        self.assertEqual(window.floating_button.objectName(), "floatingModeButton")
+        self.assertFalse(window.floating_button.icon().isNull())
+        self.assertEqual(window.floating_button.height(), 36)
+        self.assertEqual(window.format_button.objectName(), "promptButton")
+        self.assertEqual(window.format_button.height(), 36)
+        self.assertIsNone(window.format_button.findChild(QLabel, "promptButtonIcon"))
+
+        self.assertEqual(window.image_action_group.objectName(), "imageSplitGroup")
+        self.assertEqual(window.image_action_group.height(), 36)
+        self.assertEqual(window.image_paste_button.objectName(), "imageSplitPaste")
+        self.assertIs(window.image_source_button.menu(), window.image_source_menu)
+        self.assertEqual(window.image_source_button.popupMode(), QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.assertEqual(window.image_source_button.accessibleName(), "选择图片来源")
+        self.assertEqual([action.text() for action in window.image_source_menu.actions()],
+                         ["选择本地图片…"])
+        self.assertFalse(window.image_source_button.icon().isNull())
+        self.assertFalse(window.image_remove_button.isVisible())
+
+        # The real 500px minimum-width window must keep primary image actions
+        # exposed. The optional editability hint is hidden only after attach.
+        window.resize(500, 700)
+        APP.processEvents()
+        self.assertTrue(window.image_action_group.isVisible())
+        self.assertTrue(window.image_paste_button.isVisible())
+        self.assertTrue(window.image_source_button.isVisible())
+        image = QImage(24, 24, QImage.Format.Format_RGB32)
+        image.fill(QColor("#AABBCC"))
+        APP.clipboard().setImage(image)
+        window.image_paste_button.click()
+        APP.processEvents()
+        self.assertIsNotNone(window.attachment_for_add())
+        self.assertTrue(window.image_thumb.isVisible())
+        self.assertTrue(window.image_remove_button.isVisible())
+        self.assertFalse(window.preview_editable_hint.isVisible())
+        window.image_remove_button.click()
+        self.assertTrue(window.preview_editable_hint.isVisible())
+
     def test_main_window_image_clipboard_and_submit(self):
         self.floating.open_main()
         self.window.paste_box.setPlainText(raw("振り向く"))
@@ -220,7 +262,7 @@ class FloatingTests(unittest.TestCase):
             path = str(Path(directory) / "sample.png")
             self.assertTrue(image.save(path, "PNG"))
             with patch("ui.main_window.QFileDialog.getOpenFileName", return_value=(path, "图片")):
-                self.window.image_file_button.click()
+                self.window.image_file_action.trigger()
         attachment = self.window.attachment_for_add()
         self.assertIsNotNone(attachment)
         self.assertEqual((attachment.width, attachment.height), (64, 40))
