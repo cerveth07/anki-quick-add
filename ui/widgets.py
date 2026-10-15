@@ -53,17 +53,16 @@ class ReplacePasteTextEdit(QTextEdit):
 
 
 class PromptButton(QPushButton):
-    """Standard QPushButton with separate document and SVG chevron visuals.
+    """Low-emphasis prompt editor trigger with an up/down chevron.
 
-    The border/background/hover/pressed states remain entirely owned by Qt's
-    style system.  Child labels only supply the two icons and button text.
+    Qt handles the actual button state and the popup handles open/close. Child
+    labels only render the caption and chevron; mouse events go to the button.
     """
 
     def __init__(
         self,
         text: str,
         font: QFont,
-        document_icon_path: str,
         chevron_down_path: str,
         chevron_up_path: str,
         parent=None,
@@ -72,23 +71,14 @@ class PromptButton(QPushButton):
         self.setObjectName("promptButton")
         self.setText("")
         self.setAccessibleName(text)
+        self.setToolTip("查看、编辑和复制制卡提示词")
         self._down_icon = QIcon(chevron_down_path)
         self._up_icon = QIcon(chevron_up_path)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(11, 0, 6, 0)
-        layout.setSpacing(6)
+        layout.setContentsMargins(8, 0, 7, 0)
+        layout.setSpacing(5)
         layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-
-        document = QLabel(self)
-        document.setObjectName("promptButtonIcon")
-        document.setFixedSize(16, 16)
-        document.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon = QIcon(document_icon_path)
-        if not icon.isNull():
-            document.setPixmap(icon.pixmap(QSize(16, 16)))
-        document.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        layout.addWidget(document, 0, Qt.AlignmentFlag.AlignVCenter)
 
         label = QLabel(text, self)
         label.setObjectName("promptButtonText")
