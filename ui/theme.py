@@ -227,7 +227,7 @@ QLabel#sectionTitle {{
     color: {TEXT};
 }}
 QLabel#promptButtonText {{
-    color: {PROMPT_ACCENT};
+    color: #526279;
     background: transparent;
     border: none;
 }}
@@ -430,20 +430,105 @@ QPushButton:disabled {{
     border-color: {DISABLED_BG};
 }}
 QPushButton#promptButton {{
-    color: {PROMPT_ACCENT};
-    background: {SURFACE};
-    border-color: {PROMPT_BORDER};
+    color: #526279;
+    background: transparent;
+    border: 1px solid transparent;
     padding: 0px;
-    min-height: 40px;
-    max-height: 40px;
+    min-height: 36px;
+    max-height: 36px;
 }}
-QPushButton#promptButton:hover {{
-    background: {PROMPT_BG_HOVER};
-    border-color: #B8D0F5;
+QPushButton#promptButton:hover, QPushButton#promptButton:focus {{
+    background: #F0F5FC;
+    border-color: transparent;
 }}
 QPushButton#promptButton:pressed {{
-    background: {PROMPT_BG_PRESSED};
-    border-color: #9FC0EF;
+    background: #E7EEF9;
+}}
+QPushButton#floatingModeButton {{
+    color: #344054;
+    background: transparent;
+    border: 1px solid #DEE3EB;
+    border-radius: 8px;
+    padding: 0px 12px;
+    min-height: 36px;
+    max-height: 36px;
+}}
+QPushButton#floatingModeButton:hover, QPushButton#floatingModeButton:focus {{
+    background: #F0F5FC;
+    border-color: #CAD5E4;
+}}
+QPushButton#floatingModeButton:pressed {{
+    background: #E7EEF9;
+}}
+QPushButton#imageRemoveAction {{
+    color: {MUTED};
+    background: transparent;
+    border: none;
+    padding: 0px 5px;
+    min-height: 32px;
+    max-height: 32px;
+}}
+QPushButton#imageRemoveAction:hover, QPushButton#imageRemoveAction:focus {{
+    background: #F0F5FC;
+}}
+QFrame#imageSplitGroup {{
+    background: {SURFACE};
+    border: 1px solid #DEE3EB;
+    border-radius: 8px;
+}}
+QFrame#imageSplitDivider {{
+    background: #DEE3EB;
+    border: none;
+}}
+QPushButton#imageSplitPaste {{
+    color: #344054;
+    background: transparent;
+    border: none;
+    border-radius: 6px 0px 0px 6px;
+    padding: 0px 11px;
+    min-height: 34px;
+    max-height: 34px;
+}}
+QPushButton#imageSplitPaste:hover, QPushButton#imageSplitPaste:focus {{
+    background: #F0F5FC;
+}}
+QPushButton#imageSplitPaste:pressed {{
+    background: #E7EEF9;
+}}
+QToolButton#imageSplitMenu {{
+    color: #65758C;
+    background: transparent;
+    border: none;
+    border-radius: 0px 6px 6px 0px;
+    padding: 0px;
+    min-height: 34px;
+    max-height: 34px;
+}}
+QToolButton#imageSplitMenu:hover, QToolButton#imageSplitMenu:focus {{
+    background: #F0F5FC;
+}}
+QToolButton#imageSplitMenu:pressed {{
+    background: #E7EEF9;
+}}
+QToolButton#imageSplitMenu::menu-indicator {{
+    image: none;
+    width: 0px;
+    height: 0px;
+}}
+QMenu#imageSourceMenu {{
+    background: {SURFACE};
+    color: {TEXT};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    padding: 5px;
+}}
+QMenu#imageSourceMenu::item {{
+    padding: 8px 18px;
+    border-radius: 5px;
+}}
+QMenu#imageSourceMenu::item:selected {{
+    background: #F0F5FC;
+    color: {TEXT};
 }}
 QPushButton#primaryButton {{
     color: {PRIMARY_TEXT};
