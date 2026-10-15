@@ -31,7 +31,9 @@ from PySide6.QtWidgets import (
     QLabel,
     QLayout,
     QMainWindow,
+    QMenu,
     QPushButton,
+    QToolButton,
     QSizePolicy,
     QTextEdit,
     QVBoxLayout,
@@ -515,22 +517,26 @@ class MainWindow(QMainWindow):
         self.paste_title.setObjectName("sectionTitle")
         self.paste_title.setFont(self.fonts["cn_medium"])
         header_layout.addWidget(self.paste_title, 1, Qt.AlignmentFlag.AlignVCenter)
-        document_icon = os.path.join(self._bundle_dir, "ui", "icons", "document-accent.svg")
-        chevron_down = os.path.join(self._bundle_dir, "ui", "icons", "chevron-down-accent.svg")
-        chevron_up = os.path.join(self._bundle_dir, "ui", "icons", "chevron-up-accent.svg")
+        icon_dir = os.path.join(self._bundle_dir, "ui", "icons")
         self.format_button = PromptButton(
-            "制卡提示词", self.fonts["button"], document_icon, chevron_down, chevron_up, header
+            "制卡提示词", self.fonts["button"],
+            os.path.join(icon_dir, "chevron-down-muted.svg"),
+            os.path.join(icon_dir, "chevron-up-muted.svg"), header,
         )
-        self.format_button.setMinimumWidth(144)
-        self.format_button.setFixedHeight(40)
+        self.format_button.setMinimumWidth(110)
+        self.format_button.setFixedHeight(36)
         self.format_button.clicked.connect(self.toggle_format)
+
         self.floating_button = QPushButton("悬浮制卡", header)
-        self.floating_button.setObjectName("secondaryButton")
+        self.floating_button.setObjectName("floatingModeButton")
         self.floating_button.setFont(self.fonts["button"])
-        self.floating_button.setFixedHeight(40)
+        self.floating_button.setFixedHeight(36)
+        self.floating_button.setIcon(QIcon(os.path.join(icon_dir, "floating-mode.svg")))
+        self.floating_button.setIconSize(QSize(16, 16))
+        self.floating_button.setToolTip("切换到悬浮小球，自动监听复制的词卡 JSON")
         self.floating_button.clicked.connect(lambda: self.floating.enable())
         header_layout.addWidget(self.floating_button)
-        header_layout.addSpacing(10)
+        header_layout.addSpacing(8)
         header_layout.addWidget(self.format_button, 0, Qt.AlignmentFlag.AlignVCenter)
         outer.addWidget(header)
 
@@ -578,6 +584,7 @@ class MainWindow(QMainWindow):
         preview_editable.setObjectName("mutedLabel")
         preview_editable.setFont(self.fonts["small"])
         preview_head_layout.addWidget(preview_editable, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.preview_editable_hint = preview_editable
         preview_head_layout.addStretch(1)
 
         # Compact toolbar: an optional thumbnail without stealing Back-editor height.
@@ -594,26 +601,58 @@ class MainWindow(QMainWindow):
         self.image_thumb.clicked.connect(self._show_image_preview)
         self.image_thumb.setVisible(False)
         preview_head_layout.addWidget(self.image_thumb, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.image_paste_button = QPushButton("粘贴图片", preview_head)
-        self.image_file_button = QPushButton("选择图片", preview_head)
+        # Secondary image actions share one split surface, not two full buttons.
+        # Main segment: paste immediately. Arrow: choose an image file instead.
         self.image_remove_button = QPushButton("移除", preview_head)
-        for button in (self.image_paste_button, self.image_file_button, self.image_remove_button):
-            button.setObjectName("secondaryButton")
-            button.setFont(self.fonts["button"])
-            # The application-wide QPushButton rule has min-height: 38px.
-            # Override it locally so the compact preview toolbar stays 32px.
-            button.setStyleSheet(
-                "QPushButton { min-height: 32px; max-height: 32px; padding: 0px 9px; }"
-            )
-            button.setFixedHeight(32)
-            preview_head_layout.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.image_remove_button.setVisible(False)
-        self.image_paste_button.setToolTip("从剪贴板粘贴图片（不会替换词卡文本）")
-        self.image_file_button.setToolTip("选择本地图片文件")
+        self.image_remove_button.setObjectName("imageRemoveAction")
+        self.image_remove_button.setFont(self.fonts["button"])
+        self.image_remove_button.setFixedHeight(32)
         self.image_remove_button.setToolTip("移除图片附件，不清空文字草稿")
-        self.image_paste_button.clicked.connect(self._paste_image_from_clipboard)
-        self.image_file_button.clicked.connect(self._choose_image)
         self.image_remove_button.clicked.connect(self._clear_image)
+        self.image_remove_button.setVisible(False)
+        preview_head_layout.addWidget(self.image_remove_button, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        self.image_action_group = QFrame(preview_head)
+        self.image_action_group.setObjectName("imageSplitGroup")
+        self.image_action_group.setFixedHeight(36)
+        image_row = QHBoxLayout(self.image_action_group)
+        image_row.setContentsMargins(1, 1, 1, 1)
+        image_row.setSpacing(0)
+
+        icon_dir = os.path.join(self._bundle_dir, "ui", "icons")
+        self.image_paste_button = QPushButton("粘贴图片", self.image_action_group)
+        self.image_paste_button.setObjectName("imageSplitPaste")
+        self.image_paste_button.setFont(self.fonts["button"])
+        self.image_paste_button.setIcon(QIcon(os.path.join(icon_dir, "clipboard-muted.svg")))
+        self.image_paste_button.setIconSize(QSize(16, 16))
+        self.image_paste_button.setFixedHeight(34)
+        self.image_paste_button.setToolTip("从剪贴板粘贴图片（不会替换词卡文字）")
+        self.image_paste_button.clicked.connect(self._paste_image_from_clipboard)
+        image_row.addWidget(self.image_paste_button)
+
+        image_divider = QFrame(self.image_action_group)
+        image_divider.setObjectName("imageSplitDivider")
+        image_divider.setFixedSize(1, 20)
+        image_row.addWidget(image_divider)
+
+        self.image_source_button = QToolButton(self.image_action_group)
+        self.image_source_button.setObjectName("imageSplitMenu")
+        self.image_source_button.setFixedSize(32, 34)
+        self.image_source_button.setIcon(QIcon(os.path.join(icon_dir, "chevron-down-muted.svg")))
+        self.image_source_button.setIconSize(QSize(12, 12))
+        self.image_source_button.setAccessibleName("选择图片来源")
+        self.image_source_button.setToolTip("更多图片来源")
+        self.image_source_menu = QMenu(self.image_source_button)
+        self.image_source_menu.setObjectName("imageSourceMenu")
+        self.image_file_action = self.image_source_menu.addAction("选择本地图片…")
+        self.image_file_action.triggered.connect(self._choose_image)
+        self.image_source_button.setMenu(self.image_source_menu)
+        self.image_source_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        image_row.addWidget(self.image_source_button)
+
+        preview_head_layout.addWidget(
+            self.image_action_group, 0, Qt.AlignmentFlag.AlignVCenter
+        )
         outer.addWidget(preview_head)
         outer.addSpacing(GAP_TIGHT)
 
@@ -966,6 +1005,9 @@ class MainWindow(QMainWindow):
             self.image_thumb.setIcon(QIcon())
         self.image_thumb.setVisible(attached)
         self.image_remove_button.setVisible(attached)
+        # The preview heading stays readable at the 500px minimum window width.
+        # The editability hint is redundant once a picture thumbnail is shown.
+        self.preview_editable_hint.setVisible(not attached)
         if attached:
             attachment = self._image_attachment
             self.image_thumb.setToolTip(
@@ -1132,7 +1174,7 @@ class MainWindow(QMainWindow):
 
     def set_enabled(self, add_enabled: bool, editable: bool) -> None:
         self.add_button.setEnabled(add_enabled)
-        for button in (self.image_paste_button, self.image_file_button, self.image_remove_button):
+        for button in (self.image_paste_button, self.image_source_button, self.image_remove_button):
             button.setEnabled(editable)
         for editor in (self.paste_box, self.front_box, self.back_box):
             editor.setReadOnly(not editable)
