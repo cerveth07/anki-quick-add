@@ -434,8 +434,8 @@ QPushButton#promptButton {{
     background: transparent;
     border: 1px solid transparent;
     padding: 0px;
-    min-height: 36px;
-    max-height: 36px;
+    min-height: 34px;
+    max-height: 34px;
 }}
 QPushButton#promptButton:hover, QPushButton#promptButton:focus {{
     background: #F0F5FC;
@@ -450,8 +450,8 @@ QPushButton#floatingModeButton {{
     border: 1px solid #DEE3EB;
     border-radius: 8px;
     padding: 0px 12px;
-    min-height: 36px;
-    max-height: 36px;
+    min-height: 34px;
+    max-height: 34px;
 }}
 QPushButton#floatingModeButton:hover, QPushButton#floatingModeButton:focus {{
     background: #F0F5FC;
