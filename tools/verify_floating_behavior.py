@@ -150,6 +150,80 @@ class FloatingTests(unittest.TestCase):
         self.assertEqual(self.window.controller.card.front, "三")
         self.assertEqual(self.checker.added, [("一", "日语"), ("二", "日语")])
 
+    def test_reconnect_then_add_does_not_unlock_an_inflight_submission(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("一"))
+        self.executor.defer = True
+        self.window.connection_popover.reconnect_button.click()
+        self.window.controller.add_clicked()
+        self.assertEqual(len(self.executor.jobs), 1)
+        self.assertFalse(self.window.add_button.isEnabled())
+        self.executor.finish()  # connection check
+        self.executor.finish()  # duplicate check
+        self.assertEqual(self.window.controller.state, State.READY)
+        self.window.controller.add_clicked()
+        self.window.connection_popover.reconnect_button.click()
+        APP.clipboard().setText(raw("二"))
+        self.assertEqual(len(self.executor.jobs), 1)
+        self.assertEqual(self.window.controller.state, State.ADDING)
+        self.assertTrue(self.window.paste_box.isReadOnly())
+        self.assertEqual(self.window.controller.card.front, "一")
+        self.executor.defer = False
+        self.executor.finish()
+        self.settle_auto()
+        self.assertEqual(self.window.controller.card.front, "二")
+        self.assertEqual(self.checker.added, [("一", "日语")])
+
+    def test_last_queued_card_remains_protected_after_edit_and_mode_switch(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("一"))
+        self.executor.defer = True
+        self.window.controller.add_clicked()
+        APP.clipboard().setText(raw("二"))
+        self.executor.defer = False
+        self.executor.finish()
+        self.settle_auto()
+        self.assertEqual(len(self.floating.queue), 0)
+        self.window.paste_box.setPlainText(raw("二", "人工修改"))
+        self.floating.enable()
+        self.floating.open_main()
+        APP.clipboard().setText(raw("三"))
+        self.assertEqual(self.window.controller.card.front, "二")
+        self.assertEqual(self.window.controller.card.back, "人工修改")
+        self.assertEqual(len(self.floating.queue), 1)
+        self.window.controller.clear_clicked()
+        self.settle_auto()
+        self.assertEqual(self.window.controller.card.front, "三")
+
+    def test_image_survives_json_formatting_and_transient_parse_errors(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("一", "释义"))
+        image = QImage(8, 8, QImage.Format.Format_RGB32)
+        image.fill(QColor("white"))
+        self.window._attach_image(image)
+        attachment = self.window.attachment_for_add()
+        for content in (raw("一", "释义") + " ",
+                        '{ "back": "释义", "front": "一" }',
+                        '```json\n' + raw("一", "释义") + '\n```',
+                        '{"front":', raw("一", "释义")):
+            self.window.paste_box.setPlainText(content)
+            self.assertIs(self.window.attachment_for_add(), attachment)
+        self.window.back_box.setPlainText("修订释义")
+        self.window.paste_box.setPlainText(raw("一", "修订释义") + " ")
+        self.assertIs(self.window.attachment_for_add(), attachment)
+        self.window.paste_box.setPlainText('{"front":')
+        self.window.paste_box.setPlainText(raw("二", "新卡"))
+        self.assertIsNone(self.window.attachment_for_add())
+
+    def test_image_is_cleared_when_json_draft_is_erased(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("一"))
+        image = QImage(8, 8, QImage.Format.Format_RGB32)
+        image.fill(QColor("white"))
+        self.window._attach_image(image)
+        self.window.paste_box.clear()
+        self.assertIsNone(self.window.attachment_for_add())
+
     def test_main_failed_add_keeps_image_and_waiting_cards_until_retry(self):
         self.floating.open_main()
         APP.clipboard().setText(raw("一"))
@@ -412,6 +486,10 @@ class FloatingTests(unittest.TestCase):
         self.assertEqual(self.window.controller.card.front, "主窗口原词")
         APP.clipboard().setText(raw("返回后复制"))
         APP.processEvents()
+        self.assertEqual(self.window.controller.card.front, "主窗口原词")
+        self.assertEqual(len(self.floating.queue), 1)
+        self.window.controller.clear_clicked()
+        self.settle_auto()
         self.assertEqual(self.window.controller.card.front, "返回后复制")
 
     def test_deck_label_no_longer_warns_for_valid_non_default_deck(self):

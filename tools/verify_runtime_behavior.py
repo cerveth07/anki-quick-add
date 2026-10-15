@@ -155,6 +155,41 @@ def test_clear_is_blocked_while_adding() -> None:
     assert view.clear_card_calls == 0, view.clear_card_calls
 
 
+def test_controller_rejects_edits_during_submission() -> None:
+    view = FakeView()
+    ctl = controller_for(view)
+    executor = ManualExecutor()
+    ctl._executor = executor
+    ctl.card = CardModel("front", "back")
+    ctl.paste_text = '{"front":"front","back":"back"}'
+    ctl.state = State.READY
+    ctl.add_clicked()
+    ctl.front_changed("changed front")
+    ctl.back_changed("changed back")
+    ctl.paste_changed('{"front":"new","back":"new"}')
+    assert ctl.state is State.ADDING
+    assert (ctl.card.front, ctl.card.back) == ("front", "back")
+    executor.complete()
+    assert ctl.state is State.SUCCESS
+
+
+def test_old_add_completion_cannot_clear_a_newer_draft() -> None:
+    view = FakeView()
+    ctl = controller_for(view)
+    executor = ManualExecutor()
+    ctl._executor = executor
+    ctl.card = CardModel("old", "back")
+    ctl.state = State.READY
+    ctl.add_clicked()
+    # Simulate a newer editor generation independently of the UI lock. An
+    # old network completion must have authority only over its own generation.
+    ctl.state = State.EMPTY
+    ctl.paste_changed('{"front":"new","back":"new back"}')
+    executor.complete(0)
+    assert ctl.card.front == "new"
+    assert view.clear_card_calls == 0
+
+
 def test_stale_capability_result_cannot_overwrite_newer_state() -> None:
     view = FakeView()
     executor = ManualExecutor()
@@ -246,6 +281,8 @@ def test_optional_picture_payload_and_text_only_compatibility() -> None:
 TESTS = (
     test_offline_result_updates_connection_badge,
     test_clear_is_blocked_while_adding,
+    test_controller_rejects_edits_during_submission,
+    test_old_add_completion_cannot_clear_a_newer_draft,
     test_stale_capability_result_cannot_overwrite_newer_state,
     test_invalid_deck_still_populates_recovery_choices,
     test_null_add_then_disconnect_is_offline_not_generic_error,

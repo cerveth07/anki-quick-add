@@ -563,6 +563,7 @@ class MainWindow(QMainWindow):
         self.format_prompt_mode = saved_mode if saved_mode in ("text", "image") else "text"
         self._programmatic = 0
         self._image_attachment: ImageAttachment | None = None
+        self._image_card_key: tuple[str, str] | None = None
         self._format_prompt_save_timer = QTimer(self)
         self._format_prompt_save_timer.setSingleShot(True)
         self._format_prompt_save_timer.timeout.connect(self._persist_format_prompt)
@@ -1163,7 +1164,7 @@ class MainWindow(QMainWindow):
             self.controller.card.front, self.controller.card.back
         ):
             return
-        if self.controller.state is State.ADDING or self.floating.queue:
+        if self.controller.state is State.ADDING or self.floating.queue or self.floating.active is not None:
             # Reuse the existing queue so failures, retries and switching views
             # cannot overwrite a draft or lose copies received during a write.
             self.floating.enqueue(raw, card)
@@ -1174,16 +1175,13 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ image attachments
     def _on_paste_changed(self, raw: str) -> None:
-        # Preserve image-before-JSON, but never attach a previous image to a
-        # newly pasted draft. Direct Front/Back edits do not clear attachments.
-        previous = self.controller.paste_text
-        had_text_draft = bool(
-            self.controller.card.front.strip() or self.controller.card.back.strip()
-        )
-        if self._image_attachment is not None and raw != previous and (previous.strip() or had_text_draft):
+        # Invalid intermediate JSON cannot be submitted. Keep its image bound
+        # to the last valid card until parsing proves this is a different card.
+        if not raw.strip():
             self._clear_image()
-        if self.isVisible() and self.floating is not None and not self.floating._loading:
-            self.floating.active = None
+        elif self._image_attachment is not None and self.controller.card.is_complete():
+            # Direct Front/Back edits keep the image and become its current card.
+            self._image_card_key = (self.controller.card.front, self.controller.card.back)
         self.controller.paste_changed(raw)
 
     def _refresh_image_controls(self, preview: QImage | None = None) -> None:
@@ -1230,6 +1228,7 @@ class MainWindow(QMainWindow):
 
     def _clear_image(self) -> None:
         self._image_attachment = None
+        self._image_card_key = None
         self._refresh_image_controls()
 
     def _attach_image(self, image: QImage) -> None:
@@ -1247,6 +1246,8 @@ class MainWindow(QMainWindow):
         if len(data) > MAX_IMAGE_BYTES:
             raise ValueError("图片过大（PNG 超过 10 MB）")
         self._image_attachment = ImageAttachment(data, width, height)
+        card = self.controller.card
+        self._image_card_key = (card.front, card.back) if card.is_complete() else None
         self._refresh_image_controls(image)
         self.set_status("✓ 图片已附加到背面，添加到 Anki 时一并提交", "ok")
 
@@ -1311,6 +1312,16 @@ class MainWindow(QMainWindow):
             self.floating.sync()
 
     def set_card(self, front: str, back: str, hint: str = "") -> None:
+        key = (front, back)
+        if self._image_attachment is not None:
+            if self._image_card_key is not None and key != self._image_card_key:
+                self._clear_image()
+            else:
+                self._image_card_key = key
+        if self.floating is not None and self.floating.active is not None and not self.floating._loading:
+            # Editing the queued draft does not discard its queue ownership.
+            self.floating.active.raw = self.controller.paste_text
+            self.floating.active.key = key
         self._set_text(self.front_box, front, self.fonts["front"] if CJK_RE.search(front) else self.fonts["latin"])
         self._set_text(self.back_box, back)
         self._retag_back(back)
