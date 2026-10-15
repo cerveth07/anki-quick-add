@@ -48,6 +48,7 @@ from anki_launcher import (
     launch_anki,
 )
 from controller import QuickAddController, State, short_deck
+from card import CardError, parse_card
 from image_attachment import ImageAttachment, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS
 from ui.floating_window import FloatingCapture
 from ui.qt_executor import QtThreadedExecutor
@@ -586,8 +587,17 @@ class MainWindow(QMainWindow):
         self._build()
         self.floating = FloatingCapture(self)
 
+        # Mirror floating mode's clipboard capture while the main window is
+        # visible. Qt's signal offers immediate updates; polling covers the
+        # occasional missed external clipboard notification on Windows.
+        self._main_clipboard_last_text = QApplication.clipboard().text()
+        self._main_clipboard_timer = QTimer(self)
+        self._main_clipboard_timer.setInterval(400)
+        self._main_clipboard_timer.timeout.connect(self._capture_main_clipboard)
+
         app = QApplication.instance()
         if app is not None:
+            app.clipboard().dataChanged.connect(self._capture_main_clipboard)
             app.focusChanged.connect(self._sync_focus)
 
     def _build(self) -> None:
@@ -1119,6 +1129,49 @@ class MainWindow(QMainWindow):
         self._persist_format_prompt()
         self._copy_to_clipboard(text, "✓ 已复制当前模式提示词，可粘贴给 ChatGPT")
 
+    # ------------------------------------------------------------------ main-window clipboard quick fill
+    def _capture_main_clipboard(self) -> None:
+        # Never compete with the floating queue, accept stale clipboard data
+        # on window activation, or modify an in-flight Anki submission.
+        if (
+            self._closing
+            or not self.isVisible()
+            or (self.floating is not None and self.floating.enabled)
+        ):
+            return
+        clipboard = QApplication.clipboard()
+        mime = clipboard.mimeData()
+        if mime is None or mime.hasImage():
+            return  # Image copies are handled only by the explicit image tool.
+        raw = clipboard.text()
+        if raw == self._main_clipboard_last_text:
+            return
+        self._main_clipboard_last_text = raw
+        if not raw or len(raw) > 1_000_000 or self.controller.state is State.ADDING:
+            return
+        try:
+            card = parse_card(raw)
+        except CardError:
+            return  # Copying normal text never clears or corrupts a card.
+        # Compare against the original pasted JSON as well as the editable
+        # fields: manually corrected cards must survive re-copying the same
+        # JSON with different whitespace or Markdown fencing.
+        try:
+            original = parse_card(self.controller.paste_text)
+        except CardError:
+            original = None
+        if original is not None and (card.front, card.back) == (
+            original.front, original.back
+        ):
+            return
+        if (card.front, card.back) == (
+            self.controller.card.front, self.controller.card.back
+        ):
+            return
+        self.paste_box.setPlainText(raw)
+        # _wire_editor delivers this through the existing parser, preview,
+        # deck check and image-reset path. No card is submitted automatically.
+
     # ------------------------------------------------------------------ image attachments
     def _on_paste_changed(self, raw: str) -> None:
         # Preserve image-before-JSON, but never attach a previous image to a
@@ -1286,8 +1339,10 @@ class MainWindow(QMainWindow):
         self.deck_box.setCurrentIndex(index)
         del blocker
         non_default = bool(self.default_deck and name != self.default_deck)
-        self.deck_label.setText("牌组（非默认）" if non_default else "牌组")
-        self.deck_label.setStyleSheet(f"color: {WARN if non_default else TEXT};")
+        # Choosing another deck is ordinary navigation, not a warning.
+        self.deck_label.setText("牌组")
+        self.deck_label.setStyleSheet("")
+        # Keep the destination in the submit label as an unobtrusive cue.
         self.add_button.setText(f"加入 {short_deck(name)}" if non_default else "加入 Anki")
 
     def set_deck_choices(self, names) -> None:
@@ -1349,14 +1404,24 @@ class MainWindow(QMainWindow):
         rect = self.geometry()
         return f"{rect.width()}x{rect.height()}{rect.x():+d}{rect.y():+d}"
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        # Old content copied while we were hidden should not be mistaken for a
+        # newly copied card (notably when returning from floating mode).
+        self._main_clipboard_last_text = QApplication.clipboard().text()
+        self._main_clipboard_timer.start()
+
     def hideEvent(self, event) -> None:
         if hasattr(self, "deck_box"):
             self.deck_box.hidePopup()
+        self._main_clipboard_timer.stop()
         super().hideEvent(event)
 
     def closeEvent(self, event) -> None:
         self.deck_box.hidePopup()
         self._closing = True
+        self._main_clipboard_timer.stop()
+        QApplication.clipboard().dataChanged.disconnect(self._capture_main_clipboard)
         try:
             self._format_prompt_save_timer.stop()
             self._persist_format_prompt()
