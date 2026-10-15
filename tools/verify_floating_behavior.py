@@ -429,9 +429,9 @@ class FloatingTests(unittest.TestCase):
         self.assertFalse(self.floating.panel.retry_button.isVisible())
         self.assertEqual(self.window.controller.state, State.EMPTY)
 
-    def test_retry_reconnect_does_not_clear_invalid_json(self):
+    def test_retry_reconnect_does_not_clear_incomplete_draft(self):
         self.floating.open_main()
-        self.window.paste_box.setPlainText('{"front":')
+        self.window.front_box.setPlainText("未完成")
         self.assertEqual(self.window.controller.state, State.INVALID)
         message = self.window.controller.message
         self.window.controller.retry_connection()
