@@ -1073,6 +1073,11 @@ class MainWindow(QMainWindow):
         self.connection_button.set_connection(text, level)
         if hasattr(self, "connection_popover"):
             self.connection_popover.set_connection(text, level)
+        # The floating status can fall back to the main connection badge when
+        # there is no card. A connection-only retry does not necessarily call
+        # set_enabled(), so refresh the floating view here as well.
+        if self.floating is not None:
+            self.floating.sync()
 
     def set_card(self, front: str, back: str, hint: str = "") -> None:
         self._set_text(self.front_box, front, self.fonts["front"] if CJK_RE.search(front) else self.fonts["latin"])
