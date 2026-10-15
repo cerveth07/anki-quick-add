@@ -397,6 +397,48 @@ class FloatingTests(unittest.TestCase):
         APP.processEvents()
         self.assertEqual(self.checker.added, [("木漏れ日", "日语")])
 
+    def test_empty_floating_reconnect_clears_stale_offline_state(self):
+        # Regression: main indicator becomes green after retry, but the
+        # empty floating editor used to keep its old "未连接 Anki" status.
+        self.checker.offline = True
+        self.window.controller._capabilities_ok = None
+        self.window.controller.startup()
+        APP.processEvents()
+        self.assertEqual(self.window.controller.state, State.ANKI_OFFLINE)
+        self.floating.toggle_preview()
+        self.assertTrue(self.floating.panel.isVisible())
+        self.assertTrue(self.floating.panel.retry_button.isVisible())
+        self.assertIn("未连接 Anki", self.floating.panel.status_label.text())
+        self.checker.offline = False
+        self.floating.panel.retry_button.click()
+        APP.processEvents()
+        self.assertEqual(self.window.controller.state, State.EMPTY)
+        self.assertEqual(self.window.connection_button.property("level"), "ok")
+        self.assertIn("Anki 已连接", self.floating.panel.status_label.text())
+        self.assertFalse(self.floating.panel.retry_button.isVisible())
+        self.assertFalse(self.floating.panel.add_button.isEnabled())
+
+    def test_floating_empty_status_tracks_shared_connection_badge(self):
+        self.floating.toggle_preview()
+        self.assertEqual(self.window.controller.state, State.EMPTY)
+        self.window.set_connection("Anki 未连接", "warn")
+        self.assertIn("Anki 未连接", self.floating.panel.status_label.text())
+        self.assertTrue(self.floating.panel.retry_button.isVisible())
+        self.window.set_connection("Anki 已连接", "ok")
+        self.assertIn("Anki 已连接", self.floating.panel.status_label.text())
+        self.assertFalse(self.floating.panel.retry_button.isVisible())
+        self.assertEqual(self.window.controller.state, State.EMPTY)
+
+    def test_retry_reconnect_does_not_clear_invalid_json(self):
+        self.floating.open_main()
+        self.window.paste_box.setPlainText('{"front":')
+        self.assertEqual(self.window.controller.state, State.INVALID)
+        message = self.window.controller.message
+        self.window.controller.retry_connection()
+        APP.processEvents()
+        self.assertEqual(self.window.controller.state, State.INVALID)
+        self.assertEqual(self.window.controller.message, message)
+
     def test_offline_card_remains_editable(self):
         self.checker.offline = True
         self.window.controller._capabilities_ok = None
