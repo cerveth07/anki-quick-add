@@ -22,6 +22,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -79,6 +80,8 @@ DEFAULT_GEOMETRY = "980x700"
 MIN_WINDOW_WIDTH = 500
 MIN_WINDOW_HEIGHT = 700
 FORMAT_PROMPT_STATE_KEY = "format_prompt"
+IMAGE_FORMAT_PROMPT_STATE_KEY = "image_format_prompt"
+FORMAT_PROMPT_MODE_STATE_KEY = "format_prompt_mode"
 DECK_PLACEHOLDER = "请连接 Anki 后选择牌组"
 
 KANA_RE = re.compile(r"[\u3040-\u30ff\u31f0-\u31ff]")
@@ -128,6 +131,58 @@ FORMAT_PROMPT = (
 )
 
 
+# Keep the text-only prompt unchanged: existing users may have edited it.
+# The separate image preset never adds image keys to Anki's front/back JSON.
+IMAGE_FORMAT_PROMPT = r"""你负责日语字词与句子查询，生成可以直接导入 Anki Quick Add 的日语词卡。
+本模式启用智能配图：只在图片能显著帮助理解或记忆词义时，才尝试生成独立图片。
+
+1. 单个日语词
+如果用户输入单个日语词，必须生成一个独立、可复制的标准 JSON 对象。
+格式：
+{"front":"単語","back":"假名：たんご\n词性：名词\n释义：单词；词语\n例句：この単語の意味を調べる。 查询这个单词的意思。"}
+要求：
+- 只能包含 front 和 back 两个非空字符串字段，不加 image、deck、model、tags、allowDuplicate 等字段。
+- back 中的换行使用 JSON 转义符 \n，保证 JSON 可直接解析。
+- front 使用词典形；惯用语和固定搭配可以整体作为 front。
+- 例句自然、准确，附中文翻译；必要时可补充搭配、辨析或词源。
+
+2. 智能配图判断
+优先考虑动作、姿势、空间关系、日本文化特有物品与场景、难以仅靠释义理解的具体概念，以及能明显区分词义的视觉信息。
+普通基础词汇、抽象概念、助词、语法，以及图片容易误导的词汇，默认不配图。
+不要为了配图而配图；准确性始终优先。
+
+适合配图时：
+- 必须实际调用可用的图片生成工具；不能仅描述图片或输出图片提示词。
+- 图片只呈现对应物体、动作或场景。严禁任何文字、假名、注释、JSON、水印、词卡布局或教学海报。
+- 主体清晰、背景简洁，优先 3:2 横向构图；动作词突出动作，空间词突出相对位置。
+- 先生成一张独立图片，再另行输出唯一一个 JSON 代码块，以便通过代码块按钮单独复制文字。
+- JSON 代码块内仍严格只有 front/back，图片本身不写入 JSON。
+
+不适合配图或图片生成失败时：
+- 只输出一个原生 JSON 对象，不加 Markdown 围栏、说明、占位图片或虚构链接。
+- 不要声称已经生成实际并不存在的图片。
+
+3. 输入的是变形后的词
+front 必须使用词典形／原形；back 说明所见变形及其语法构成。配图如有必要，应准确表现当前语境中的含义。
+
+4. 输入的是完整句子
+先输出：
+假名：整句完整读音
+完整翻译：自然、准确的中文翻译
+必要时简要解释影响理解的语法或语感。
+再选择真正值得学习的重点词、惯用语或重要语法，每项分别生成独立的 front/back JSON；不要凑数量。
+默认不为多个重点词分别生图，以免图片和 JSON 对应关系混乱；只有用户明确指定某个词时才单独为该词生成图片。
+
+5. 输入的是截图
+先识别截图中的日语文本：单词按第 1–3 条处理，完整句子按第 4 条处理。不要直接把截图当作新生成的配图。
+
+6. 其他日语问题
+构词结构、语法原理、词义辨析、语感等问题，正常使用中文解释，不强制 JSON，除非图片确实有助于解释，否则不生图。
+
+输出时确保 JSON 独立、合法且可复制；图片不得与词卡文字合成为一张图。
+"""
+
+
 def _prepare_editor(editor: QTextEdit) -> None:
     editor.setAcceptRichText(False)
     editor.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
@@ -141,7 +196,7 @@ def _prepare_editor(editor: QTextEdit) -> None:
 class PromptPopover(QWidget):
     """Anchored, non-modal prompt editor shown beside the prompt button."""
 
-    def __init__(self, parent: QWidget, fonts, prompt: str):
+    def __init__(self, parent: QWidget, fonts, prompt: str, mode: str = "text"):
         super().__init__(
             parent,
             Qt.WindowType.Popup
@@ -178,6 +233,30 @@ class PromptPopover(QWidget):
         title.setFont(fonts["cn_medium"])
         layout.addWidget(title)
         layout.addSpacing(10)
+
+        # The two presets share the existing editor; their values and
+        # persistence are kept separate by MainWindow.
+        mode_surface = QFrame(panel)
+        mode_surface.setObjectName("promptModeSurface")
+        mode_layout = QHBoxLayout(mode_surface)
+        mode_layout.setContentsMargins(3, 3, 3, 3)
+        mode_layout.setSpacing(3)
+        self.mode_group = QButtonGroup(self)
+        self.mode_group.setExclusive(True)
+        self.mode_buttons = {}
+        for mode_key, label in (("text", "纯文本"), ("image", "智能配图")):
+            button = QPushButton(label, mode_surface)
+            button.setObjectName("promptModeButton")
+            button.setFont(fonts["button"])
+            button.setCheckable(True)
+            button.setFixedHeight(30)
+            button.setAccessibleName(label + "制卡模式")
+            self.mode_group.addButton(button)
+            self.mode_buttons[mode_key] = button
+            mode_layout.addWidget(button)
+        layout.addWidget(mode_surface)
+        layout.addSpacing(10)
+        self.set_mode(mode)
 
         self.prompt_box = QTextEdit(panel)
         self.prompt_box.setObjectName("promptEdit")
@@ -223,6 +302,10 @@ class PromptPopover(QWidget):
         layout.addWidget(button_row)
 
         root.addWidget(panel)
+
+    def set_mode(self, mode: str) -> None:
+        for name, button in self.mode_buttons.items():
+            button.setChecked(name == mode)
 
     @staticmethod
     def _link_button(text: str, parent: QWidget) -> QPushButton:
@@ -470,6 +553,17 @@ class MainWindow(QMainWindow):
             self.format_prompt = saved_format_prompt
         else:
             self.format_prompt = FORMAT_PROMPT
+        saved_image_prompt = state.get(IMAGE_FORMAT_PROMPT_STATE_KEY)
+        self.image_format_prompt = (
+            saved_image_prompt if isinstance(saved_image_prompt, str)
+            else IMAGE_FORMAT_PROMPT
+        )
+        self.format_prompts = {
+            "text": self.format_prompt,
+            "image": self.image_format_prompt,
+        }
+        saved_mode = state.get(FORMAT_PROMPT_MODE_STATE_KEY)
+        self.format_prompt_mode = saved_mode if saved_mode in ("text", "image") else "text"
         self._programmatic = 0
         self._image_attachment: ImageAttachment | None = None
         self._format_prompt_save_timer = QTimer(self)
@@ -802,8 +896,16 @@ class MainWindow(QMainWindow):
         return popover
 
     def _build_prompt_popover(self) -> PromptPopover:
-        popover = PromptPopover(self, self.fonts, self.format_prompt)
+        popover = PromptPopover(
+            self, self.fonts,
+            self.format_prompts[self.format_prompt_mode],
+            self.format_prompt_mode,
+        )
         popover.prompt_box.textChanged.connect(self._schedule_format_prompt_save)
+        for mode, button in popover.mode_buttons.items():
+            button.clicked.connect(
+                lambda _checked=False, key=mode: self._switch_format_prompt_mode(key)
+            )
         popover.copy_button.clicked.connect(self._copy_prompt)
         popover.reset_button.clicked.connect(self._reset_format_prompt)
         return popover
@@ -960,30 +1062,62 @@ class MainWindow(QMainWindow):
         self._format_prompt_save_timer.start(500)
 
     def _persist_format_prompt(self) -> None:
-        value = self.format_prompt_box.toPlainText().strip()
-        if value:
+        # Persist exactly the active editor, not whichever preset was active
+        # when a delayed save timer was originally scheduled.
+        mode = self.format_prompt_mode
+        value = self.format_prompt_box.toPlainText()
+        self.format_prompts[mode] = value
+        if mode == "image":
+            self.image_format_prompt = value
+            self._save_state(image_format_prompt=value)
+        else:
             self.format_prompt = value
             self._save_state(format_prompt=value)
 
-    def _reset_format_prompt(self) -> None:
-        self._programmatic += 1
+    def _switch_format_prompt_mode(self, mode: str) -> None:
+        if mode not in ("text", "image") or mode == self.format_prompt_mode:
+            return
+        self._format_prompt_save_timer.stop()
+        self._persist_format_prompt()  # save pending edits BEFORE switching
+        self.format_prompt_mode = mode
         blocker = QSignalBlocker(self.format_prompt_box)
         try:
-            self.format_prompt_box.setPlainText(FORMAT_PROMPT)
-            self.format_prompt = FORMAT_PROMPT
+            self.format_prompt_box.setPlainText(self.format_prompts[mode])
         finally:
             del blocker
-            self._programmatic -= 1
-        self._save_state(format_prompt=FORMAT_PROMPT)
-        self._copy_to_clipboard(FORMAT_PROMPT, "✓ 已恢复默认格式要求")
+        self.prompt_popover.set_mode(mode)
+        self._save_state(format_prompt_mode=mode)
+
+    def _reset_format_prompt(self) -> None:
+        mode = self.format_prompt_mode
+        template = IMAGE_FORMAT_PROMPT if mode == "image" else FORMAT_PROMPT
+        self._format_prompt_save_timer.stop()
+        blocker = QSignalBlocker(self.format_prompt_box)
+        try:
+            self.format_prompt_box.setPlainText(template)
+        finally:
+            del blocker
+        self.format_prompts[mode] = template
+        if mode == "image":
+            self.image_format_prompt = template
+            self._save_state(image_format_prompt=template)
+        else:
+            self.format_prompt = template
+            self._save_state(format_prompt=template)
+        self._copy_to_clipboard(template, "✓ 已恢复当前模式默认提示词")
 
     def _copy_to_clipboard(self, text: str, note: str) -> None:
         QApplication.clipboard().setText(text)
         self.set_status(note, "ok")
 
     def _copy_prompt(self) -> None:
-        text = self.format_prompt_box.toPlainText().strip() or FORMAT_PROMPT
-        self._copy_to_clipboard(text, "✓ 已复制格式要求：直接粘给 ChatGPT 即可")
+        text = self.format_prompt_box.toPlainText().strip()
+        if not text:
+            self.set_status("⚠ 当前提示词为空，请先填写内容", "warn")
+            return
+        self._format_prompt_save_timer.stop()
+        self._persist_format_prompt()
+        self._copy_to_clipboard(text, "✓ 已复制当前模式提示词，可粘贴给 ChatGPT")
 
     # ------------------------------------------------------------------ image attachments
     def _on_paste_changed(self, raw: str) -> None:
@@ -1224,8 +1358,15 @@ class MainWindow(QMainWindow):
         self.deck_box.hidePopup()
         self._closing = True
         try:
+            self._format_prompt_save_timer.stop()
             self._persist_format_prompt()
-            self._save_state(geometry=self._geometry_string(), deck=self.controller.deck, format_prompt=self.format_prompt)
+            self._save_state(
+                geometry=self._geometry_string(),
+                deck=self.controller.deck,
+                format_prompt=self.format_prompt,
+                image_format_prompt=self.image_format_prompt,
+                format_prompt_mode=self.format_prompt_mode,
+            )
         except Exception:
             log.exception("保存窗口状态失败")
         self.prompt_popover.hide()

@@ -87,7 +87,7 @@ STATUS_BADGE_DOT_GAP = 8
 # Keep the preview usable while allowing the current compact minimum window.
 PREVIEW_MIN_GROUP = 270
 PROMPT_POPOVER_WIDTH = 410
-PROMPT_POPOVER_HEIGHT = 360
+PROMPT_POPOVER_HEIGHT = 402
 
 # These files are fetched from pinned upstream releases by tools/build_windows.ps1
 # and bundled by PyInstaller.  Source runs still degrade gracefully to installed
@@ -343,6 +343,31 @@ QFrame#deckSurface[focused="true"] {{
 QFrame#promptSurface {{
     background: {FORMAT_SURFACE};
     border-color: {BORDER};
+}}
+QFrame#promptModeSurface {{
+    background: #EEF2F8;
+    border: none;
+    border-radius: 8px;
+}}
+QPushButton#promptModeButton {{
+    color: #69778C;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 0px 12px;
+    min-height: 30px;
+    max-height: 30px;
+}}
+QPushButton#promptModeButton:hover {{
+    background: #E5ECF7;
+}}
+QPushButton#promptModeButton:checked {{
+    color: {TEXT};
+    background: {SURFACE};
+    border: 1px solid #DEE5EF;
+}}
+QPushButton#promptModeButton:checked:hover {{
+    background: {SURFACE};
 }}
 QFrame#divider {{
     background: {DIVIDER};

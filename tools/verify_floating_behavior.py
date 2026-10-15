@@ -21,7 +21,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QToolButton, QVBo
 from anki import AddResult, AnkiOfflineError, Capabilities, CheckResult
 from config import Config
 from controller import State
-from ui.main_window import MainWindow
+from ui.main_window import MainWindow, FORMAT_PROMPT, IMAGE_FORMAT_PROMPT
 from ui.theme import (
     FLOAT_CONTROL_SIZE, FLOAT_EDITOR_SIZE, FLOAT_META_SIZE,
     FLOAT_TITLE_SIZE, application_stylesheet,
@@ -131,6 +131,85 @@ class FloatingTests(unittest.TestCase):
         self.floating.clipboard.setText(value)
         self.floating.read_clipboard()
         APP.processEvents()
+
+    def test_prompt_presets_default_to_text_with_image_template_available(self):
+        self.floating.open_main()
+        popup = self.window.prompt_popover
+        self.assertEqual(self.window.format_prompt_mode, "text")
+        self.assertTrue(popup.mode_buttons["text"].isChecked())
+        self.assertFalse(popup.mode_buttons["image"].isChecked())
+        self.assertEqual(popup.prompt_box.toPlainText(), FORMAT_PROMPT)
+        popup.mode_buttons["image"].click()
+        self.assertEqual(self.window.format_prompt_mode, "image")
+        self.assertTrue(popup.mode_buttons["image"].isChecked())
+        self.assertEqual(popup.prompt_box.toPlainText(), IMAGE_FORMAT_PROMPT)
+        self.assertIn("只能包含 front 和 back", IMAGE_FORMAT_PROMPT)
+        self.assertIn("先生成一张独立图片", IMAGE_FORMAT_PROMPT)
+        self.assertEqual(self.saved["format_prompt_mode"], "image")
+
+    def test_prompt_presets_keep_custom_edits_and_copy_active_mode(self):
+        self.floating.open_main()
+        popup = self.window.prompt_popover
+        text_a = "纯文本自定义提示词 A"
+        image_b = "智能配图自定义提示词 B"
+        popup.prompt_box.setPlainText(text_a)
+        popup.mode_buttons["image"].click()
+        self.assertEqual(self.saved["format_prompt"], text_a)
+        popup.prompt_box.setPlainText(image_b)
+        popup.mode_buttons["text"].click()
+        self.assertEqual(self.saved["image_format_prompt"], image_b)
+        self.assertEqual(popup.prompt_box.toPlainText(), text_a)
+        self.window._copy_prompt()
+        self.assertEqual(APP.clipboard().text(), text_a)
+        popup.mode_buttons["image"].click()
+        self.assertEqual(popup.prompt_box.toPlainText(), image_b)
+        self.window._copy_prompt()
+        self.assertEqual(APP.clipboard().text(), image_b)
+
+    def test_prompt_reset_only_affects_current_preset(self):
+        self.floating.open_main()
+        popup = self.window.prompt_popover
+        popup.prompt_box.setPlainText("纯文本预设自定义")
+        popup.mode_buttons["image"].click()
+        popup.prompt_box.setPlainText("智能配图预设自定义")
+        popup.reset_button.click()
+        self.assertEqual(popup.prompt_box.toPlainText(), IMAGE_FORMAT_PROMPT)
+        self.assertEqual(self.saved["image_format_prompt"], IMAGE_FORMAT_PROMPT)
+        popup.mode_buttons["text"].click()
+        self.assertEqual(popup.prompt_box.toPlainText(), "纯文本预设自定义")
+        self.assertEqual(self.saved["format_prompt"], "纯文本预设自定义")
+
+    def test_prompt_persistence_restores_two_modes_without_overwriting_legacy_text(self):
+        self.floating.open_main()
+        saved = {}
+        w = MainWindow(
+            FakeChecker(),
+            {"format_prompt": "旧版纯文本已编辑", "image_format_prompt": "图片自定义",
+             "format_prompt_mode": "image"},
+            saved.update, str(ROOT), executor=Executor(),
+        )
+        try:
+            self.assertEqual(w.format_prompt_mode, "image")
+            self.assertEqual(w.prompt_popover.prompt_box.toPlainText(), "图片自定义")
+            w.prompt_popover.mode_buttons["text"].click()
+            self.assertEqual(w.prompt_popover.prompt_box.toPlainText(), "旧版纯文本已编辑")
+            w.prompt_popover.mode_buttons["image"].click()
+            self.assertEqual(w.prompt_popover.prompt_box.toPlainText(), "图片自定义")
+            w.close()
+            self.assertEqual(saved["format_prompt"], "旧版纯文本已编辑")
+            self.assertEqual(saved["image_format_prompt"], "图片自定义")
+            self.assertEqual(saved["format_prompt_mode"], "image")
+        finally:
+            if not w._closing:
+                w.close()
+
+    def test_prompt_empty_copy_does_not_replace_clipboard(self):
+        self.floating.open_main()
+        popup = self.window.prompt_popover
+        popup.prompt_box.setPlainText("")
+        APP.clipboard().setText("keep-this")
+        self.window._copy_prompt()
+        self.assertEqual(APP.clipboard().text(), "keep-this")
 
     def test_prompt_popover_second_click_closes_without_reopening(self):
         self.floating.open_main()
