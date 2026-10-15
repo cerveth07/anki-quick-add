@@ -131,6 +131,8 @@ def save_state(
     geometry: str | None = None,
     deck: str | None = None,
     format_prompt: str | None = None,
+    image_format_prompt: str | None = None,
+    format_prompt_mode: str | None = None,
     anki_executable: str | None = None,
     floating_position: list[int] | None = None,
 ) -> None:
@@ -141,6 +143,10 @@ def save_state(
         data["deck"] = deck
     if format_prompt is not None:
         data["format_prompt"] = format_prompt
+    if image_format_prompt is not None:
+        data["image_format_prompt"] = image_format_prompt
+    if format_prompt_mode in ("text", "image"):
+        data["format_prompt_mode"] = format_prompt_mode
     if anki_executable is not None:
         if anki_executable:
             data["anki_executable"] = anki_executable
