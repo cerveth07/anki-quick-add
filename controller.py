@@ -123,6 +123,7 @@ class QuickAddController:
             return
 
         self._capabilities_ok = None
+        self._last_check = None
 
         def after_connection() -> None:
             if self.card.is_complete():
@@ -206,6 +207,10 @@ class QuickAddController:
         if not self.card.back.strip():
             self._set_state(State.INVALID, "⚠ 背面为空")
             return
+        if not self._capabilities_ok:
+            self._last_check = None
+            self._ensure_capabilities(self._schedule_check)
+            return
         if recheck:
             self._schedule_check()
             return
@@ -242,6 +247,8 @@ class QuickAddController:
                 log.exception("查重异常", exc_info=error)
                 self._set_state(State.ERROR, f"⚠ 查重失败：{error}")
                 return
+            if result.state in ("READY", "DUPLICATE"):
+                self.view.set_connection("Anki 已连接", "ok")
             self._last_check = (card.front, result)
             self._apply_check(result)
 
