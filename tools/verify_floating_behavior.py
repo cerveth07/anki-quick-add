@@ -1333,11 +1333,17 @@ class FloatingTests(unittest.TestCase):
         self.floating.open_main()
         self.assert_popup_is_closed(self.window.deck_box, self.window.close)
 
-    @unittest.skipUnless(sys.platform == "win32", "Windows foreground integration")
+    @unittest.skipUnless(
+        sys.platform == "win32" and os.environ.get("QT_QPA_PLATFORM") == "windows",
+        "Windows foreground integration requires the native Windows Qt backend",
+    )
     def test_external_clipboard_copy_does_not_steal_windows_focus(self):
         self._exercise_external_clipboard(automatic=False)
 
-    @unittest.skipUnless(sys.platform == "win32", "Windows foreground integration")
+    @unittest.skipUnless(
+        sys.platform == "win32" and os.environ.get("QT_QPA_PLATFORM") == "windows",
+        "Windows foreground integration requires the native Windows Qt backend",
+    )
     def test_auto_external_clipboard_adds_without_stealing_focus(self):
         self._exercise_external_clipboard(automatic=True)
 
@@ -1382,4 +1388,22 @@ class FloatingTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    if sys.platform == "win32" and os.environ.get("AQA_QT_TEST_MODE") is None:
+        offscreen_env = dict(os.environ, QT_QPA_PLATFORM="offscreen", AQA_QT_TEST_MODE="offscreen")
+        result = subprocess.run([sys.executable, __file__], env=offscreen_env)
+        if result.returncode:
+            raise SystemExit(result.returncode)
+
+        native_env = dict(os.environ, QT_QPA_PLATFORM="windows", AQA_QT_TEST_MODE="native")
+        result = subprocess.run(
+            [
+                sys.executable,
+                __file__,
+                "FloatingTests.test_external_clipboard_copy_does_not_steal_windows_focus",
+                "FloatingTests.test_auto_external_clipboard_adds_without_stealing_focus",
+            ],
+            env=native_env,
+        )
+        raise SystemExit(result.returncode)
+
     unittest.main()
