@@ -243,6 +243,9 @@ class PromptPopover(QWidget):
             x = max(available.left() + 8, min(x, available.right() - self.width() + 1 - 8))
             y = max(available.top() + 8, min(y, available.bottom() - self.height() + 1 - 8))
             self.move(x, y)
+        # The flag is per dismissing mouse press, not permanent: ordinary
+        # outside clicks should still be delivered to the clicked widget.
+        self.setAttribute(Qt.WidgetAttribute.WA_NoMouseReplay, False)
         self.show()
         self.raise_()
 
@@ -261,6 +264,19 @@ class PromptPopover(QWidget):
             self._caret.hide()
 
         self.prompt_box.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def mousePressEvent(self, event) -> None:
+        # Qt.Popup closes on an outside mouse press. When that press hits the
+        # button which opened us, Qt may replay it to the button and immediately
+        # reopen the popup on mouse release. Prevent replay only for this button;
+        # clicks elsewhere retain normal outside-click behavior.
+        parent = self.parentWidget()
+        trigger = getattr(parent, "format_button", None)
+        if trigger is not None and trigger.isVisible():
+            click_in_trigger = trigger.mapFromGlobal(event.globalPosition().toPoint())
+            if trigger.rect().contains(click_in_trigger):
+                self.setAttribute(Qt.WidgetAttribute.WA_NoMouseReplay, True)
+        super().mousePressEvent(event)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
