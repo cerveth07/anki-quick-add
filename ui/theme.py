@@ -85,7 +85,7 @@ STATUS_BADGE_PAD_X = 14
 STATUS_BADGE_DOT_SIZE = 11
 STATUS_BADGE_DOT_GAP = 8
 # Keep the preview usable while allowing the current compact minimum window.
-PREVIEW_MIN_GROUP = 270
+PREVIEW_MIN_GROUP = 224
 PROMPT_POPOVER_WIDTH = 410
 PROMPT_POPOVER_HEIGHT = 402
 
@@ -234,6 +234,26 @@ QLabel#promptButtonText {{
 QLabel#mutedLabel, QLabel#hintLabel, QLabel#statusLabel {{
     color: {MUTED};
 }}
+QLabel#queueLabel {{
+    color: #526279;
+}}
+QFrame#successSurface {{
+    background: #EDF8F1;
+    border: 1px solid #D5EADB;
+    border-radius: 6px;
+}}
+QLabel#successText {{ color: #28834F; }}
+QToolButton#noticeClose {{
+    color: #48866A; background: transparent; border: none;
+    padding: 0px; border-radius: 4px;
+}}
+QToolButton#noticeClose:hover {{ background: #DCEFE3; }}
+QPushButton#jsonToggle {{
+    background: {SURFACE}; border: 1px solid {BORDER};
+    border-radius: 6px; padding: 0px; min-height: 34px; max-height: 34px;
+}}
+QPushButton#jsonToggle:hover {{ border-color: {FOCUS}; }}
+QLabel#jsonToggleText {{ color: {PRIMARY}; }}
 QLabel#placeholderLabel {{
     color: {PLACEHOLDER};
 }}
@@ -597,7 +617,7 @@ QComboBox#deckCombo {{
     background: transparent;
     border: none;
     padding: 0px 10px 0px 0px;
-    min-height: 40px;
+    min-height: 36px;
 }}
 QComboBox#deckCombo:disabled {{
     color: {DISABLED_TEXT};

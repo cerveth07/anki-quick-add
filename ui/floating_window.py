@@ -505,7 +505,6 @@ class FloatingCapture(QObject):
             return
         ctl = self.main.controller
         hint = "已忽略未知字段：" + "、".join(ctl.card.ignored_keys) if ctl.card.ignored_keys else ""
-        self.main._show_hint(hint)
         if self.enabled and not self.active and not self._finishing and (ctl.card.front or ctl.card.back):
             self.active = PendingCard(ctl.paste_text, (ctl.card.front, ctl.card.back))
         for editor, text in ((self.panel.front_box, ctl.card.front), (self.panel.back_box, ctl.card.back)):
@@ -585,6 +584,8 @@ class FloatingCapture(QObject):
                 QTimer.singleShot(0, self._load_next)
         elif self.queue and not self._loading and not self._finishing and ctl.state in (State.EMPTY, State.SUCCESS):
             QTimer.singleShot(0, self._load_next)
+        # Publish after ownership changes, including discarding the final card.
+        self.main._show_hint(hint)
 
     def _complete(self):
         if self.closed:

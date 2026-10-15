@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QToolButton, QVBo
 from anki import AddResult, AnkiOfflineError, Capabilities, CheckResult
 from config import Config
 from controller import State
+from ui.floating_window import PendingCard
 from ui.main_window import MainWindow, FORMAT_PROMPT, IMAGE_FORMAT_PROMPT
 from ui.theme import (
     FLOAT_CONTROL_SIZE, FLOAT_EDITOR_SIZE, FLOAT_META_SIZE,
@@ -132,6 +133,128 @@ class FloatingTests(unittest.TestCase):
         self.floating.read_clipboard()
         APP.processEvents()
 
+    def test_main_json_fold_preserves_input_and_opens_for_errors(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw())
+        APP.processEvents()
+        self.assertFalse(self.window.paste_surface.isVisible())
+        self.assertEqual(self.window.paste_summary.text(), "已解析")
+        self.window.back_box.clear()
+        self.assertFalse(self.window.paste_surface.isVisible())
+        self.window.back_box.setPlainText("こもれび\n从树叶缝隙洒下的阳光")
+        self.window.paste_toggle.click()
+        self.window.paste_box.setFocus()
+        self.window.paste_box.setPlainText(raw() + " ")
+        self.assertTrue(self.window.paste_surface.isVisible())
+        self.assertIs(APP.focusWidget(), self.window.paste_box)
+        self.window.paste_toggle.click()
+        self.window.paste_box.setPlainText('{"front":')
+        self.assertTrue(self.window.paste_surface.isVisible())
+        self.assertEqual(self.window.paste_summary.text(), "需修正")
+        self.assertFalse(self.window.add_button.isEnabled())
+        self.window.clear_button.click()
+        self.assertEqual(self.window.paste_box.toPlainText(), "")
+        self.assertTrue(self.window.paste_surface.isVisible())
+
+    def test_main_success_notice_survives_next_card_and_expires_independently(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("上一张"))
+        self.executor.defer = True
+        self.window.add_button.click()
+        self.assertFalse(self.window.clear_button.isEnabled())
+        APP.clipboard().setText(raw("下一张"))
+        self.executor.defer = False
+        self.executor.finish()
+        self.settle_auto()
+        self.assertTrue(self.window.success_notice.isVisible())
+        self.assertIn("上一张", self.window.success_label.toolTip())
+        self.assertEqual(self.window.controller.card.front, "下一张")
+        self.assertIn("可添加", self.window.status_label.toolTip())
+        self.assertFalse(self.window.paste_surface.isVisible())
+        self.window._success_timer.start(1)
+        QTest.qWait(20)
+        self.assertFalse(self.window.success_notice.isVisible())
+        self.assertEqual(self.window.controller.card.front, "下一张")
+        self.checker.fail_add = True
+        self.window.add_button.click()
+        self.assertFalse(self.window.success_notice.isVisible())
+        self.assertEqual(self.window.controller.card.front, "下一张")
+
+    def test_main_discard_button_advances_only_one_card_and_resets_final_status(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("一"))
+        self.executor.defer = True
+        self.window.add_button.click()
+        APP.clipboard().setText(raw("二"))
+        APP.clipboard().setText(raw("三"))
+        self.executor.defer = False
+        self.executor.finish()
+        self.settle_auto()
+        self.assertEqual(self.window.clear_button.text(), "丢弃当前卡")
+        self.assertIn("1", self.window.queue_label.text())
+        self.window.clear_button.click()
+        self.settle_auto()
+        self.assertEqual(self.window.controller.card.front, "三")
+        self.assertIn("0", self.window.queue_label.text())
+        self.assertTrue(self.window.queue_label.isVisible())
+        self.window.clear_button.click()
+        self.settle_auto()
+        self.assertFalse(self.window.queue_label.isVisible())
+        self.assertEqual(self.window.clear_button.text(), "清空")
+        self.assertEqual(self.window.controller.card.front, "")
+        self.assertEqual(self.checker.added, [("一", "日语")])
+
+    def test_main_compact_layout_contains_long_content_at_minimum_size(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("长词" * 30, "例句和释义\n" * 100))
+        self.window._submitted_front = "长词" * 100
+        self.window._submitted_deck = "长牌组" * 60
+        self.window._show_success()
+        self.floating.active = PendingCard(
+            self.window.controller.paste_text,
+            (self.window.controller.card.front, self.window.controller.card.back),
+        )
+        self.floating.sync()
+        image = QImage(24, 24, QImage.Format.Format_RGB32)
+        image.fill(QColor("white"))
+        self.window._attach_image(image)
+        self.window.set_deck("父牌组::" + "很长的目标牌组" * 30)
+        self.window.set_status("⚠ 添加失败：" + "请检查连接和配置；" * 100, "warn")
+        for size in ((500, 700), (980, 700), (980, 900)):
+            for expanded in (False, True):
+                with self.subTest(size=size, expanded=expanded):
+                    self.window.resize(*size)
+                    self.window._set_json_expanded(expanded)
+                    APP.processEvents()
+                    self.assertEqual(self.window.size().toTuple(), size)
+                    root = self.window.centralWidget()
+                    controls = [self.window.paste_toggle, self.window.preview_surface,
+                                self.window.action_row, self.window.success_notice,
+                                self.window.image_action_group, self.window.status_label,
+                                self.window.queue_label]
+                    if expanded:
+                        controls.append(self.window.paste_surface)
+                    for widget in controls:
+                        top_left = widget.mapTo(root, QPoint(0, 0))
+                        self.assertGreaterEqual(top_left.y(), 0)
+                        self.assertGreaterEqual(top_left.x(), 0)
+                        self.assertLessEqual(top_left.y() + widget.height(), root.height())
+                        self.assertLessEqual(top_left.x() + widget.width(), root.width())
+                    self.assertGreaterEqual(self.window.paste_toggle.height(), 36)
+                    self.assertGreaterEqual(self.window.back_box.height(), 86)
+                    for button in (self.window.image_paste_button, self.window.image_source_button):
+                        self.assertTrue(self.window.image_action_group.rect().contains(button.geometry()))
+                    self.assertLessEqual(self.window.add_button.fontMetrics().horizontalAdvance(
+                        self.window.add_button.text()), self.window.add_button.width() - 28)
+                    self.assertGreater(self.window.back_box.verticalScrollBar().maximum(), 0)
+                    self.assertGreater(self.window.front_box.verticalScrollBar().maximum(), 0)
+                    self.assertLess(self.window.preview_surface.geometry().bottom(),
+                                    self.window.action_row.geometry().top())
+                    self.assertLessEqual(self.window.success_notice.height(), 38)
+        self.window.success_close_button.click()
+        self.assertFalse(self.window.success_notice.isVisible())
+        self.assertFalse(self.window._success_timer.isActive())
+
     def test_main_copies_during_add_are_processed_in_order(self):
         self.floating.open_main()
         APP.clipboard().setText(raw("一"))
@@ -241,7 +364,7 @@ class FloatingTests(unittest.TestCase):
         APP.clipboard().setText(raw("三"))
         self.assertEqual(self.window.controller.card.front, "一")
         self.assertIs(self.window.attachment_for_add(), attachment)
-        self.assertIn("2", self.window.hint_label.text())
+        self.assertIn("2", self.window.queue_label.text())
         self.checker.fail_add = False
         self.window.controller.retry_connection()
         self.window.controller.add_clicked()
@@ -274,6 +397,7 @@ class FloatingTests(unittest.TestCase):
     def test_backspace_invalid_json_does_not_open_prompt(self):
         self.floating.open_main()
         APP.clipboard().setText(raw())
+        self.window.paste_toggle.click()
         editor = self.window.paste_box
         editor.setFocus()
         editor.moveCursor(editor.textCursor().MoveOperation.End)
