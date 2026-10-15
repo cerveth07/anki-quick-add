@@ -127,6 +127,16 @@ class QuickAddController:
         def after_connection() -> None:
             if self.card.is_complete():
                 self._schedule_check()
+            elif self.state in (State.ANKI_OFFLINE, State.ERROR):
+                # A connection-only retry can succeed without a complete card.
+                # Clear obsolete offline/error card status as well as updating
+                # the main connection badge, or the floating editor continues
+                # to display the old failure even after Anki reconnects.
+                if self.card.front.strip() or self.card.back.strip():
+                    missing = "正面" if not self.card.front.strip() else "背面"
+                    self._set_state(State.INVALID, f"⚠ {missing}为空")
+                elif not self.paste_text.strip():
+                    self._set_state(State.EMPTY, "")
 
         self._ensure_capabilities(after_connection, connection_only=True)
 
