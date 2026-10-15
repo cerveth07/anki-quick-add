@@ -1153,10 +1153,21 @@ class MainWindow(QMainWindow):
             card = parse_card(raw)
         except CardError:
             return  # Copying normal text never clears or corrupts a card.
+        # Compare against the original pasted JSON as well as the editable
+        # fields: manually corrected cards must survive re-copying the same
+        # JSON with different whitespace or Markdown fencing.
+        try:
+            original = parse_card(self.controller.paste_text)
+        except CardError:
+            original = None
+        if original is not None and (card.front, card.back) == (
+            original.front, original.back
+        ):
+            return
         if (card.front, card.back) == (
             self.controller.card.front, self.controller.card.back
         ):
-            return  # A reformatted duplicate must not erase manual edits.
+            return
         self.paste_box.setPlainText(raw)
         # _wire_editor delivers this through the existing parser, preview,
         # deck check and image-reset path. No card is submitted automatically.
