@@ -132,6 +132,51 @@ class FloatingTests(unittest.TestCase):
         self.floating.read_clipboard()
         APP.processEvents()
 
+    def test_prompt_popover_second_click_closes_without_reopening(self):
+        self.floating.open_main()
+        button = self.window.format_button
+        popup = self.window.prompt_popover
+        self.assertFalse(popup.isVisible())
+        QTest.mouseClick(button, Qt.MouseButton.LeftButton)
+        APP.processEvents()
+        self.assertTrue(popup.isVisible())
+        # With Qt.Popup the native outside press can dismiss the popup before
+        # the opener's click is replayed. The real button click must not reopen.
+        QTest.mouseClick(button, Qt.MouseButton.LeftButton)
+        APP.processEvents()
+        QTest.qWait(100)
+        self.assertFalse(popup.isVisible())
+        QTest.mouseClick(button, Qt.MouseButton.LeftButton)
+        APP.processEvents()
+        self.assertTrue(popup.isVisible())
+
+    def test_prompt_popup_opener_press_disables_mouse_replay_only_for_anchor(self):
+        self.floating.open_main()
+        popup = self.window.prompt_popover
+        button = self.window.format_button
+        button.click()
+        APP.processEvents()
+        self.assertTrue(popup.isVisible())
+        # Send an outside press targeting the opener to the Popup itself.
+        # Its default QWidget handler closes the popup; the handler must first
+        # mark this press as not eligible for replay.
+        anchor_global = button.mapToGlobal(button.rect().center())
+        outside_local = popup.mapFromGlobal(anchor_global)
+        self.assertFalse(popup.rect().contains(outside_local))
+        QTest.mousePress(popup, Qt.MouseButton.LeftButton, pos=outside_local)
+        APP.processEvents()
+        self.assertFalse(popup.isVisible())
+        QTest.mouseRelease(popup, Qt.MouseButton.LeftButton, pos=outside_local)
+        APP.processEvents()
+        self.assertFalse(popup.isVisible())
+        button.click()
+        APP.processEvents()
+        self.assertTrue(popup.isVisible())
+        self.window.paste_box.setFocus()
+        APP.processEvents()
+        popup.hide()
+        self.assertFalse(popup.isVisible())
+
     def test_main_window_image_clipboard_and_submit(self):
         self.floating.open_main()
         self.window.paste_box.setPlainText(raw("振り向く"))
