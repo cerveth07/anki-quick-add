@@ -2,6 +2,10 @@ name: Publish Windows Release
 
 on:
   push:
+    branches:
+      - main
+    paths:
+      - "VERSION"
     tags:
       - "v*"
 
@@ -22,9 +26,27 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Validate version and prepare release notes
+      - name: Resolve release version and prepare release notes
         shell: pwsh
-        run: python tools/release_notes.py "$env:GITHUB_REF_NAME" release-notes.md
+        run: |
+          # A VERSION change on main can publish directly. Manual tag pushes
+          # continue to use the existing verified-tag release flow.
+          $tag = if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $env:GITHUB_REF_NAME
+          } else {
+            "v$((Get-Content -LiteralPath 'VERSION' -Raw).Trim())"
+          }
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          python tools/release_notes.py "$tag" release-notes.md
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify Windows runtime and UI behavior
+        shell: pwsh
+        run: |
+          python tools/verify_runtime_behavior.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/verify_floating_behavior.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Install build dependencies
         shell: pwsh
@@ -86,4 +108,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$env:GITHUB_REF_NAME" "dist/AnkiQuickAdd-Windows.zip" "dist/SHA256SUMS.txt" --verify-tag --notes-file release-notes.md --title "Anki Quick Add $env:GITHUB_REF_NAME"
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            gh release create "$env:RELEASE_TAG" "dist/AnkiQuickAdd-Windows.zip" "dist/SHA256SUMS.txt" --verify-tag --notes-file release-notes.md --title "Anki Quick Add $env:RELEASE_TAG"
+          } else {
+            # The release command creates the version tag on this exact commit.
+            gh release create "$env:RELEASE_TAG" "dist/AnkiQuickAdd-Windows.zip" "dist/SHA256SUMS.txt" --target "$env:GITHUB_SHA" --notes-file release-notes.md --title "Anki Quick Add $env:RELEASE_TAG"
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
