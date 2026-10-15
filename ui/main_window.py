@@ -48,18 +48,14 @@ from anki_launcher import (
     launch_anki,
 )
 from controller import QuickAddController, State, short_deck
-from card import CardError, parse_card
+from card import CardError, CardModel, parse_card
 from image_attachment import ImageAttachment, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS
-from ui.floating_window import FloatingCapture
+from ui.floating_window import FloatingCapture, FloatingStatusLabel
 from ui.qt_executor import QtThreadedExecutor
 from ui.theme import (
-    GAP_LABEL,
     GAP_PANEL,
-    GAP_SECTION,
-    GAP_STATUS_TO_HEADER,
     GAP_TIGHT,
     MUTED,
-    PAGE_BOTTOM,
     PAGE_SIDE,
     PREVIEW_MIN_BACK,
     PREVIEW_MIN_GROUP,
@@ -551,22 +547,26 @@ class MainWindow(QMainWindow):
             and saved_format_prompt.strip()
             and saved_format_prompt.strip() != LEGACY_FORMAT_PROMPT.strip()
         ):
-            self.format_prompt = saved_format_prompt
+            text_prompt = saved_format_prompt
         else:
-            self.format_prompt = FORMAT_PROMPT
+            text_prompt = FORMAT_PROMPT
         saved_image_prompt = state.get(IMAGE_FORMAT_PROMPT_STATE_KEY)
-        self.image_format_prompt = (
-            saved_image_prompt if isinstance(saved_image_prompt, str)
-            else IMAGE_FORMAT_PROMPT
-        )
         self.format_prompts = {
-            "text": self.format_prompt,
-            "image": self.image_format_prompt,
+            "text": text_prompt,
+            "image": saved_image_prompt if isinstance(saved_image_prompt, str) else IMAGE_FORMAT_PROMPT,
         }
         saved_mode = state.get(FORMAT_PROMPT_MODE_STATE_KEY)
         self.format_prompt_mode = saved_mode if saved_mode in ("text", "image") else "text"
         self._programmatic = 0
         self._image_attachment: ImageAttachment | None = None
+        self._image_card_key: tuple[str, str] | None = None
+        self._editing_json = False
+        self._paste_user_expanded = False
+        self._submitted_front = ""
+        self._submitted_deck = ""
+        self._success_timer = QTimer(self)
+        self._success_timer.setSingleShot(True)
+        self._success_timer.timeout.connect(lambda: self.success_notice.hide())
         self._format_prompt_save_timer = QTimer(self)
         self._format_prompt_save_timer.setSingleShot(True)
         self._format_prompt_save_timer.timeout.connect(self._persist_format_prompt)
@@ -590,14 +590,14 @@ class MainWindow(QMainWindow):
         # Mirror floating mode's clipboard capture while the main window is
         # visible. Qt's signal offers immediate updates; polling covers the
         # occasional missed external clipboard notification on Windows.
-        self._main_clipboard_last_text = QApplication.clipboard().text()
+        self._clipboard_last_text = ""
         self._main_clipboard_timer = QTimer(self)
         self._main_clipboard_timer.setInterval(400)
         self._main_clipboard_timer.timeout.connect(self._capture_main_clipboard)
 
         app = QApplication.instance()
         if app is not None:
-            app.clipboard().dataChanged.connect(self._capture_main_clipboard)
+            app.clipboard().dataChanged.connect(self._main_clipboard_changed)
             app.focusChanged.connect(self._sync_focus)
 
     def _build(self) -> None:
@@ -605,22 +605,17 @@ class MainWindow(QMainWindow):
         root.setObjectName("rootWidget")
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
-        outer.setContentsMargins(PAGE_SIDE, 20, PAGE_SIDE, PAGE_BOTTOM)
+        outer.setContentsMargins(PAGE_SIDE, 16, PAGE_SIDE, 16)
         outer.setSpacing(0)
         self.outer_layout = outer
 
-        self._build_connection_badge(outer)
-        self.connection_popover = self._build_connection_popover()
-
-        outer.addSpacing(GAP_STATUS_TO_HEADER)
         header = QWidget(root)
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(0)
-        self.paste_title = QLabel("制卡内容", header)
-        self.paste_title.setObjectName("sectionTitle")
-        self.paste_title.setFont(self.fonts["cn_medium"])
-        header_layout.addWidget(self.paste_title, 1, Qt.AlignmentFlag.AlignVCenter)
+        self._build_connection_badge(header_layout)
+        header_layout.addStretch(1)
+        self.connection_popover = self._build_connection_popover()
         icon_dir = os.path.join(self._bundle_dir, "ui", "icons")
         toolbar_font = QFont(self.fonts["button"])
         toolbar_font.setPixelSize(14)
@@ -645,10 +640,70 @@ class MainWindow(QMainWindow):
         header_layout.addSpacing(8)
         header_layout.addWidget(self.format_button, 0, Qt.AlignmentFlag.AlignVCenter)
         outer.addWidget(header)
+        outer.addSpacing(8)
 
-        outer.addSpacing(GAP_LABEL)
+        # Reserve no space after the notice is dismissed; extra height belongs
+        # to the Back editor rather than another permanently empty status row.
+        self.success_notice = QWidget(root)
+        self.success_notice.setFixedHeight(36)
+        notice_layout = QVBoxLayout(self.success_notice)
+        notice_layout.setContentsMargins(0, 0, 0, 6)
+        notice_layout.setSpacing(0)
+        success_surface = QFrame(self.success_notice)
+        success_surface.setObjectName("successSurface")
+        success_row = QHBoxLayout(success_surface)
+        success_row.setContentsMargins(10, 0, 4, 0)
+        success_row.setSpacing(4)
+        self.success_label = FloatingStatusLabel()
+        self.success_label.setFont(self.fonts["small"])
+        self.success_label.setObjectName("successText")
+        success_row.addWidget(self.success_label, 1)
+        self.success_close_button = QToolButton(success_surface)
+        self.success_close_button.setObjectName("noticeClose")
+        self.success_close_button.setText("×")
+        self.success_close_button.setFixedSize(26, 26)
+        self.success_close_button.setAccessibleName("关闭添加成功提示")
+        self.success_close_button.clicked.connect(self._dismiss_success)
+        success_row.addWidget(self.success_close_button)
+        notice_layout.addWidget(success_surface)
+        self.success_notice.hide()
+        outer.addWidget(self.success_notice)
+
+        self.paste_toggle = QPushButton(root)
+        self.paste_toggle.setObjectName("jsonToggle")
+        self.paste_toggle.setFixedHeight(36)
+        self.paste_toggle.setCheckable(True)
+        self.paste_toggle.setChecked(True)
+        self.paste_toggle.setAccessibleName("展开或收起制卡 JSON")
+        json_row = QHBoxLayout(self.paste_toggle)
+        json_row.setContentsMargins(12, 0, 12, 0)
+        json_row.setSpacing(8)
+        self.paste_title = QLabel("制卡内容 · JSON", self.paste_toggle)
+        self.paste_title.setFont(self.fonts["button"])
+        self.paste_summary = QLabel("待输入", self.paste_toggle)
+        self.paste_summary.setObjectName("mutedLabel")
+        self.paste_summary.setFont(self.fonts["small"])
+        self.hint_label = FloatingStatusLabel()
+        self.hint_label.setObjectName("hintLabel")
+        self.hint_label.setFont(self.fonts["small"])
+        self.hint_label.hide()
+        self.paste_toggle_label = QLabel("收起 ⌃", self.paste_toggle)
+        self.paste_toggle_label.setFont(self.fonts["small"])
+        self.paste_toggle_label.setObjectName("jsonToggleText")
+        for label in (self.paste_title, self.paste_summary, self.hint_label, self.paste_toggle_label):
+            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        json_row.addWidget(self.paste_title)
+        json_row.addWidget(self.paste_summary)
+        json_row.addWidget(self.hint_label, 1)
+        json_row.addStretch(1)
+        json_row.addWidget(self.paste_toggle_label)
+        self.paste_toggle.toggled.connect(self._toggle_json)
+        outer.addWidget(self.paste_toggle)
+        outer.addSpacing(4)
+
         self.paste_surface = FocusSurface("pasteSurface", root)
-        self.paste_surface.setFixedHeight(148)
+        self.paste_surface.setMinimumHeight(80)
+        self.paste_surface.setMaximumHeight(148)
         paste_layout = QVBoxLayout(self.paste_surface)
         paste_layout.setContentsMargins(1, 1, 1, 1)
         paste_layout.setSpacing(0)
@@ -660,24 +715,10 @@ class MainWindow(QMainWindow):
         paste_layout.addWidget(self.paste_box)
         outer.addWidget(self.paste_surface)
 
-        self.status_label = QLabel(root)
-        self.status_label.setObjectName("statusLabel")
-        self.status_label.setFont(self.fonts["small"])
-        self.status_label.setWordWrap(True)
-        self.status_label.setVisible(False)
-        outer.addWidget(self.status_label)
-
-        self.hint_label = QLabel(root)
-        self.hint_label.setObjectName("hintLabel")
-        self.hint_label.setFont(self.fonts["small"])
-        self.hint_label.setWordWrap(True)
-        self.hint_label.setVisible(False)
-        outer.addWidget(self.hint_label)
-
         self.prompt_popover = self._build_prompt_popover()
         self.format_prompt_box = self.prompt_popover.prompt_box
 
-        outer.addSpacing(GAP_SECTION)
+        outer.addSpacing(12)
         preview_head = QWidget(root)
         preview_head_layout = QHBoxLayout(preview_head)
         preview_head_layout.setContentsMargins(0, 0, 0, 0)
@@ -722,7 +763,8 @@ class MainWindow(QMainWindow):
         self.image_action_group.setObjectName("imageSplitGroup")
         self.image_action_group.setFixedHeight(36)
         image_row = QHBoxLayout(self.image_action_group)
-        image_row.setContentsMargins(1, 1, 1, 1)
+        # QFrame already reserves its 1px border inside the 36px surface.
+        image_row.setContentsMargins(0, 0, 0, 0)
         image_row.setSpacing(0)
 
         icon_dir = os.path.join(self._bundle_dir, "ui", "icons")
@@ -775,7 +817,7 @@ class MainWindow(QMainWindow):
         self.front_box.setFont(self.fonts["cn"])
         self.front_box.setPlaceholderText("在此输入卡片正面内容…")
         _prepare_editor(self.front_box)
-        self.front_box.setFixedHeight(50)
+        self.front_box.setFixedHeight(44)
         preview_layout.addWidget(self.front_box)
 
         preview_layout.addSpacing(PREVIEW_PAD_Y)
@@ -796,7 +838,21 @@ class MainWindow(QMainWindow):
         preview_layout.addWidget(self.back_box, 1)
         outer.addWidget(self.preview_surface, 1)
 
-        outer.addSpacing(GAP_SECTION)
+        outer.addSpacing(8)
+        feedback_row = QHBoxLayout()
+        feedback_row.setSpacing(8)
+        self.status_label = FloatingStatusLabel()
+        self.status_label.setObjectName("statusLabel")
+        self.status_label.setFont(self.fonts["small"])
+        feedback_row.addWidget(self.status_label, 1)
+        self.queue_label = QLabel(root)
+        self.queue_label.setFont(self.fonts["small"])
+        self.queue_label.setObjectName("queueLabel")
+        self.queue_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.queue_label.setFixedHeight(28)
+        feedback_row.addWidget(self.queue_label)
+        outer.addLayout(feedback_row)
+        outer.addSpacing(6)
         self._build_action_row(outer, root)
 
         self._wire_editor(self.paste_box, self._on_paste_changed)
@@ -811,7 +867,7 @@ class MainWindow(QMainWindow):
         self.set_enabled(False, True)
         QTimer.singleShot(0, self.focus_paste)
 
-    def _build_connection_badge(self, outer: QVBoxLayout) -> None:
+    def _build_connection_badge(self, outer: QHBoxLayout) -> None:
         icon_dir = os.path.join(self._bundle_dir, "ui", "icons")
         self.connection_button = ConnectionButton(
             self.fonts["cn"],
@@ -826,7 +882,8 @@ class MainWindow(QMainWindow):
 
     def _build_action_row(self, outer: QVBoxLayout, parent: QWidget) -> None:
         action = QWidget(parent)
-        action.setFixedHeight(46)
+        action.setFixedHeight(42)
+        self.action_row = action
         row = QHBoxLayout(action)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(GAP_TIGHT)
@@ -836,11 +893,11 @@ class MainWindow(QMainWindow):
         row.addWidget(self.deck_label, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self.deck_surface = FocusSurface("deckSurface", action)
-        self.deck_surface.setFixedHeight(46)
-        self.deck_surface.setMinimumWidth(120)
+        self.deck_surface.setFixedHeight(42)
+        self.deck_surface.setMinimumWidth(80)
         self.deck_surface.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         deck_layout = QHBoxLayout(self.deck_surface)
-        deck_layout.setContentsMargins(12, 2, 4, 2)
+        deck_layout.setContentsMargins(10, 1, 4, 1)
         deck_layout.setSpacing(8)
         self.deck_icon = QLabel(self.deck_surface)
         self.deck_icon.setObjectName("deckIcon")
@@ -856,6 +913,8 @@ class MainWindow(QMainWindow):
         self.deck_box.setFont(self.fonts["cn"])
         self.deck_box.setEditable(False)
         self.deck_box.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.deck_box.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.deck_box.setMinimumContentsLength(4)
         deck_arrow_path = os.path.join(self._bundle_dir, "ui", "icons", "chevron-down-muted.svg").replace("\\", "/")
         self.deck_box.setStyleSheet(
             f'QComboBox#deckCombo::down-arrow {{ image: url("{deck_arrow_path}"); width: 10px; height: 10px; }}'
@@ -868,32 +927,32 @@ class MainWindow(QMainWindow):
         self.clear_button = QPushButton("清空", action)
         self.clear_button.setObjectName("secondaryButton")
         self.clear_button.setFont(self.fonts["button"])
-        self.clear_button.setFixedHeight(46)
-        self.clear_button.setMinimumWidth(94)
+        self.clear_button.setFixedHeight(42)
+        self.clear_button.setMinimumWidth(104)
         self.clear_button.clicked.connect(self.controller.clear_clicked)
         row.addWidget(self.clear_button, 0)
 
         self.add_button = QPushButton("加入 Anki", action)
         self.add_button.setObjectName("primaryButton")
         self.add_button.setFont(self.fonts["button"])
-        self.add_button.setFixedHeight(46)
-        self.add_button.setMinimumWidth(144)
+        self.add_button.setFixedHeight(42)
+        self.add_button.setMinimumWidth(124)
         self.add_button.clicked.connect(self.controller.add_clicked)
         row.addWidget(self.add_button, 0)
         outer.addWidget(action)
 
     def _preview_heading(self, text: str, accent_name: str) -> QWidget:
         row = QWidget(self.preview_surface)
-        row.setFixedHeight(32)
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
         marker = QFrame(row)
         marker.setObjectName(accent_name)
-        marker.setFixedSize(6, 24)
+        marker.setFixedSize(4, 18)
         layout.addWidget(marker, 0, Qt.AlignmentFlag.AlignVCenter)
         label = QLabel(text, row)
         label.setFont(self.fonts["section"])
+        row.setFixedHeight(max(24, label.fontMetrics().height() + 2))
         layout.addWidget(label, 1, Qt.AlignmentFlag.AlignVCenter)
         return row
 
@@ -1077,12 +1136,8 @@ class MainWindow(QMainWindow):
         mode = self.format_prompt_mode
         value = self.format_prompt_box.toPlainText()
         self.format_prompts[mode] = value
-        if mode == "image":
-            self.image_format_prompt = value
-            self._save_state(image_format_prompt=value)
-        else:
-            self.format_prompt = value
-            self._save_state(format_prompt=value)
+        key = IMAGE_FORMAT_PROMPT_STATE_KEY if mode == "image" else FORMAT_PROMPT_STATE_KEY
+        self._save_state(**{key: value})
 
     def _switch_format_prompt_mode(self, mode: str) -> None:
         if mode not in ("text", "image") or mode == self.format_prompt_mode:
@@ -1107,14 +1162,8 @@ class MainWindow(QMainWindow):
             self.format_prompt_box.setPlainText(template)
         finally:
             del blocker
-        self.format_prompts[mode] = template
-        if mode == "image":
-            self.image_format_prompt = template
-            self._save_state(image_format_prompt=template)
-        else:
-            self.format_prompt = template
-            self._save_state(format_prompt=template)
-        self._copy_to_clipboard(template, "✓ 已恢复当前模式默认提示词")
+        self._persist_format_prompt()
+        self.set_status("✓ 已恢复当前模式默认提示词", "ok")
 
     def _copy_to_clipboard(self, text: str, note: str) -> None:
         QApplication.clipboard().setText(text)
@@ -1130,7 +1179,22 @@ class MainWindow(QMainWindow):
         self._copy_to_clipboard(text, "✓ 已复制当前模式提示词，可粘贴给 ChatGPT")
 
     # ------------------------------------------------------------------ main-window clipboard quick fill
-    def _capture_main_clipboard(self) -> None:
+    def _read_clipboard_card(self, raw: str, *, copied: bool = False) -> CardModel | None:
+        """One read cursor for both modes; a new copy can intentionally repeat."""
+        if raw == self._clipboard_last_text and not copied:
+            return None
+        self._clipboard_last_text = raw
+        if not raw or len(raw) > 1_000_000:
+            return None
+        try:
+            return parse_card(raw)
+        except CardError:
+            return None
+
+    def _main_clipboard_changed(self) -> None:
+        self._capture_main_clipboard(copied=True)
+
+    def _capture_main_clipboard(self, *, copied: bool = False) -> None:
         # Never compete with the floating queue, accept stale clipboard data
         # on window activation, or modify an in-flight Anki submission.
         if (
@@ -1144,14 +1208,8 @@ class MainWindow(QMainWindow):
         if mime is None or mime.hasImage():
             return  # Image copies are handled only by the explicit image tool.
         raw = clipboard.text()
-        if raw == self._main_clipboard_last_text:
-            return
-        self._main_clipboard_last_text = raw
-        if not raw or len(raw) > 1_000_000 or self.controller.state is State.ADDING:
-            return
-        try:
-            card = parse_card(raw)
-        except CardError:
+        card = self._read_clipboard_card(raw, copied=copied)
+        if card is None:
             return  # Copying normal text never clears or corrupts a card.
         # Compare against the original pasted JSON as well as the editable
         # fields: manually corrected cards must survive re-copying the same
@@ -1168,21 +1226,58 @@ class MainWindow(QMainWindow):
             self.controller.card.front, self.controller.card.back
         ):
             return
+        if self.controller.state is State.ADDING or self.floating.queue or self.floating.active is not None:
+            # Reuse the existing queue so failures, retries and switching views
+            # cannot overwrite a draft or lose copies received during a write.
+            self.floating.enqueue(raw, card)
+            return
         self.paste_box.setPlainText(raw)
+        if not self._paste_user_expanded and self.controller.card.is_complete():
+            self._set_json_expanded(False)
         # _wire_editor delivers this through the existing parser, preview,
         # deck check and image-reset path. No card is submitted automatically.
 
     # ------------------------------------------------------------------ image attachments
     def _on_paste_changed(self, raw: str) -> None:
-        # Preserve image-before-JSON, but never attach a previous image to a
-        # newly pasted draft. Direct Front/Back edits do not clear attachments.
-        previous = self.controller.paste_text
-        had_text_draft = bool(
-            self.controller.card.front.strip() or self.controller.card.back.strip()
-        )
-        if self._image_attachment is not None and raw != previous and (previous.strip() or had_text_draft):
+        # Invalid intermediate JSON cannot be submitted. Keep its image bound
+        # to the last valid card until parsing proves this is a different card.
+        if not raw.strip():
             self._clear_image()
-        self.controller.paste_changed(raw)
+        elif self._image_attachment is not None and self.controller.card.is_complete():
+            # Direct Front/Back edits keep the image and become its current card.
+            self._image_card_key = (self.controller.card.front, self.controller.card.back)
+        self._editing_json = True
+        try:
+            self.controller.paste_changed(raw)
+            if self.controller.state is State.INVALID:
+                self._set_json_expanded(True)
+        finally:
+            self._editing_json = False
+
+    def _toggle_json(self, expanded: bool) -> None:
+        self._paste_user_expanded = expanded
+        self._set_json_expanded(expanded)
+
+    def _set_json_expanded(self, expanded: bool) -> None:
+        blocker = QSignalBlocker(self.paste_toggle)
+        self.paste_toggle.setChecked(expanded)
+        del blocker
+        self.paste_surface.setVisible(expanded)
+        self.paste_toggle_label.setText("收起 ⌃" if expanded else "展开 ⌄")
+        self.paste_toggle.setToolTip("收起 JSON 输入区" if expanded else "展开 JSON 输入区，查看或修改原始内容")
+        if not expanded and self.paste_box.hasFocus():
+            self.paste_toggle.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _dismiss_success(self) -> None:
+        self._success_timer.stop()
+        self.success_notice.hide()
+
+    def _show_success(self) -> None:
+        # Capture fields at ADDING, before clear_card erases the submitted draft.
+        text = f"✓ 已添加「{self._submitted_front}」到 {self._submitted_deck}"
+        self.success_label.set_status(text, " ".join(text.split()))
+        self.success_notice.show()
+        self._success_timer.start(4500)
 
     def _refresh_image_controls(self, preview: QImage | None = None) -> None:
         attached = self._image_attachment is not None
@@ -1228,6 +1323,7 @@ class MainWindow(QMainWindow):
 
     def _clear_image(self) -> None:
         self._image_attachment = None
+        self._image_card_key = None
         self._refresh_image_controls()
 
     def _attach_image(self, image: QImage) -> None:
@@ -1245,6 +1341,8 @@ class MainWindow(QMainWindow):
         if len(data) > MAX_IMAGE_BYTES:
             raise ValueError("图片过大（PNG 超过 10 MB）")
         self._image_attachment = ImageAttachment(data, width, height)
+        card = self.controller.card
+        self._image_card_key = (card.front, card.back) if card.is_complete() else None
         self._refresh_image_controls(image)
         self.set_status("✓ 图片已附加到背面，添加到 Anki 时一并提交", "ok")
 
@@ -1291,13 +1389,15 @@ class MainWindow(QMainWindow):
         return self._image_attachment
 
     def set_status(self, text: str, level: str = "info") -> None:
-        self.status_label.setText(text)
+        if self.controller.state is State.SUCCESS and text == self.controller.message:
+            if self.isVisible():
+                self._show_success()
+            text = ""
+        self.status_label.set_status(text)
         self.status_label.setStyleSheet(f"color: {WARN if level == 'warn' else MUTED if level == 'info' else '#36A86B'};")
         hidden_connection_status = text.startswith(("⚠ 未连接 Anki", "正在连接 Anki…"))
         visible = bool(text) and not hidden_connection_status
         self.status_label.setVisible(visible)
-        if text.startswith(("⚠ 无法解析", "⚠ JSON 顶层")):
-            self.show_prompt_popover()
 
     def set_connection(self, text: str, level: str = "info") -> None:
         level = level if level in {"ok", "warn", "info"} else "info"
@@ -1311,6 +1411,18 @@ class MainWindow(QMainWindow):
             self.floating.sync()
 
     def set_card(self, front: str, back: str, hint: str = "") -> None:
+        if not self._editing_json and not self._paste_user_expanded:
+            self._set_json_expanded(False)
+        key = (front, back)
+        if self._image_attachment is not None:
+            if self._image_card_key is not None and key != self._image_card_key:
+                self._clear_image()
+            else:
+                self._image_card_key = key
+        if self.floating is not None and self.floating.active is not None and not self.floating._loading:
+            # Editing the queued draft does not discard its queue ownership.
+            self.floating.active.raw = self.controller.paste_text
+            self.floating.active.key = key
         self._set_text(self.front_box, front, self.fonts["front"] if CJK_RE.search(front) else self.fonts["latin"])
         self._set_text(self.back_box, back)
         self._retag_back(back)
@@ -1325,10 +1437,27 @@ class MainWindow(QMainWindow):
         self._set_text(self.paste_box, "")
         self.clear_preview()
         self._clear_image()
+        self._paste_user_expanded = False
+        self._set_json_expanded(True)
 
     def _show_hint(self, text: str) -> None:
-        self.hint_label.setText(text)
+        self.hint_label.set_status(text)
         self.hint_label.setVisible(bool(text))
+        self.paste_toggle.setAccessibleDescription(text)
+        self._update_queue_status()
+
+    def _update_queue_status(self) -> None:
+        protected = self.floating is not None and bool(self.floating.active or self.floating.queue)
+        pending = len(self.floating.queue) if self.floating is not None else 0
+        self.queue_label.setText(f"当前卡已保留 · 后续 {pending} 张" if protected else "")
+        self.queue_label.setVisible(protected)
+        self.queue_label.setToolTip("新复制的词卡将继续排队；当前卡添加成功或主动丢弃后，继续处理下一张。")
+        self.clear_button.setText("丢弃当前卡" if protected else "清空")
+        self.clear_button.setToolTip(
+            "丢弃当前卡及配图，继续显示下一张；后续队列保留" if protected
+            else "清空当前草稿和配图"
+        )
+        self.clear_button.setEnabled(self.controller.state is not State.ADDING)
 
     def set_deck(self, name: str) -> None:
         index = self.deck_box.findText(name, Qt.MatchFlag.MatchExactly)
@@ -1343,7 +1472,16 @@ class MainWindow(QMainWindow):
         self.deck_label.setText("牌组")
         self.deck_label.setStyleSheet("")
         # Keep the destination in the submit label as an unobtrusive cue.
-        self.add_button.setText(f"加入 {short_deck(name)}" if non_default else "加入 Anki")
+        if non_default:
+            metrics = self.add_button.fontMetrics()
+            available = self.add_button.minimumWidth() - 30 - metrics.horizontalAdvance("加入 ")
+            destination = metrics.elidedText(short_deck(name), Qt.TextElideMode.ElideLeft, available)
+            self.add_button.setText(f"加入 {destination}")
+        else:
+            self.add_button.setText("加入 Anki")
+        self.add_button.setToolTip(f"添加到牌组：{name}\nCtrl + Enter")
+        self.add_button.setAccessibleName(f"添加到牌组：{name}")
+        self.deck_box.setToolTip(name)
 
     def set_deck_choices(self, names) -> None:
         values = sorted(str(name) for name in names)
@@ -1360,16 +1498,23 @@ class MainWindow(QMainWindow):
     def focus_paste(self) -> None:
         if not self.isVisible():
             return
-        self.paste_box.setFocus(Qt.FocusReason.OtherFocusReason)
-        QTimer.singleShot(0, lambda: self.paste_box.setFocus(Qt.FocusReason.OtherFocusReason) if self.isVisible() else None)
+        target = self.paste_box if self.paste_toggle.isChecked() else self.front_box
+        target.setFocus(Qt.FocusReason.OtherFocusReason)
+        QTimer.singleShot(0, lambda: target.setFocus(Qt.FocusReason.OtherFocusReason) if self.isVisible() and target.isVisible() else None)
 
     def set_enabled(self, add_enabled: bool, editable: bool) -> None:
+        if self.controller.state is State.ADDING:
+            self._submitted_front = self.controller.card.front
+            self._submitted_deck = self.controller.deck
+        self.paste_summary.setText("已解析" if self.controller.card.is_complete() else
+                                   "需修正" if self.controller.state is State.INVALID else "待输入")
         self.add_button.setEnabled(add_enabled)
         for button in (self.image_paste_button, self.image_source_button, self.image_remove_button):
             button.setEnabled(editable)
         for editor in (self.paste_box, self.front_box, self.back_box):
             editor.setReadOnly(not editable)
         self.deck_box.setEnabled(editable)
+        self._update_queue_status()
         if self.floating is not None:
             self.floating.sync()
 
@@ -1408,28 +1553,29 @@ class MainWindow(QMainWindow):
         super().showEvent(event)
         # Old content copied while we were hidden should not be mistaken for a
         # newly copied card (notably when returning from floating mode).
-        self._main_clipboard_last_text = QApplication.clipboard().text()
+        self._clipboard_last_text = QApplication.clipboard().text()
         self._main_clipboard_timer.start()
 
     def hideEvent(self, event) -> None:
         if hasattr(self, "deck_box"):
             self.deck_box.hidePopup()
         self._main_clipboard_timer.stop()
+        self._dismiss_success()
         super().hideEvent(event)
 
     def closeEvent(self, event) -> None:
         self.deck_box.hidePopup()
         self._closing = True
         self._main_clipboard_timer.stop()
-        QApplication.clipboard().dataChanged.disconnect(self._capture_main_clipboard)
+        QApplication.clipboard().dataChanged.disconnect(self._main_clipboard_changed)
         try:
             self._format_prompt_save_timer.stop()
             self._persist_format_prompt()
             self._save_state(
                 geometry=self._geometry_string(),
                 deck=self.controller.deck,
-                format_prompt=self.format_prompt,
-                image_format_prompt=self.image_format_prompt,
+                format_prompt=self.format_prompts["text"],
+                image_format_prompt=self.format_prompts["image"],
                 format_prompt_mode=self.format_prompt_mode,
             )
         except Exception:

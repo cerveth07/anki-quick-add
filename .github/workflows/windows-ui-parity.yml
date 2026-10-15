@@ -9,6 +9,7 @@ on:
       - "ui/**"
       - "tools/capture_ui_parity.py"
       - "tools/verify_runtime_behavior.py"
+      - "tools/verify_floating_behavior.py"
       - ".github/workflows/windows-ui-parity.yml"
 
 permissions:
@@ -129,6 +130,9 @@ jobs:
         shell: pwsh
         run: |
           python tools/verify_runtime_behavior.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/verify_floating_behavior.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload Windows UI screenshots
         if: always()

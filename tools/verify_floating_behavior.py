@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QToolButton, QVBo
 from anki import AddResult, AnkiOfflineError, Capabilities, CheckResult
 from config import Config
 from controller import State
+from ui.floating_window import PendingCard
 from ui.main_window import MainWindow, FORMAT_PROMPT, IMAGE_FORMAT_PROMPT
 from ui.theme import (
     FLOAT_CONTROL_SIZE, FLOAT_EDITOR_SIZE, FLOAT_META_SIZE,
@@ -132,6 +133,409 @@ class FloatingTests(unittest.TestCase):
         self.floating.read_clipboard()
         APP.processEvents()
 
+    def test_main_json_fold_preserves_input_and_opens_for_errors(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw())
+        APP.processEvents()
+        self.assertFalse(self.window.paste_surface.isVisible())
+        self.assertEqual(self.window.paste_summary.text(), "已解析")
+        self.window.back_box.clear()
+        self.assertFalse(self.window.paste_surface.isVisible())
+        self.window.back_box.setPlainText("こもれび\n从树叶缝隙洒下的阳光")
+        self.window.paste_toggle.click()
+        self.window.paste_box.setFocus()
+        self.window.paste_box.setPlainText(raw() + " ")
+        self.assertTrue(self.window.paste_surface.isVisible())
+        self.assertIs(APP.focusWidget(), self.window.paste_box)
+        self.window.paste_toggle.click()
+        self.window.paste_box.setPlainText('{"front":')
+        self.assertTrue(self.window.paste_surface.isVisible())
+        self.assertEqual(self.window.paste_summary.text(), "需修正")
+        self.assertFalse(self.window.add_button.isEnabled())
+        self.window.clear_button.click()
+        self.assertEqual(self.window.paste_box.toPlainText(), "")
+        self.assertTrue(self.window.paste_surface.isVisible())
+
+    def test_main_success_notice_survives_next_card_and_expires_independently(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("上一张"))
+        self.executor.defer = True
+        self.window.add_button.click()
+        self.assertFalse(self.window.clear_button.isEnabled())
+        APP.clipboard().setText(raw("下一张"))
+        self.executor.defer = False
+        self.executor.finish()
+        self.settle_auto()
+        self.assertTrue(self.window.success_notice.isVisible())
+        self.assertIn("上一张", self.window.success_label.toolTip())
+        self.assertEqual(self.window.controller.card.front, "下一张")
+        self.assertIn("可添加", self.window.status_label.toolTip())
+        self.assertFalse(self.window.paste_surface.isVisible())
+        self.window._success_timer.start(1)
+        QTest.qWait(20)
+        self.assertFalse(self.window.success_notice.isVisible())
+        self.assertEqual(self.window.controller.card.front, "下一张")
+        self.checker.fail_add = True
+        self.window.add_button.click()
+        self.assertFalse(self.window.success_notice.isVisible())
+        self.assertEqual(self.window.controller.card.front, "下一张")
+
+    def test_main_discard_button_advances_only_one_card_and_resets_final_status(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("一"))
+        self.executor.defer = True
+        self.window.add_button.click()
+        APP.clipboard().setText(raw("二"))
+        APP.clipboard().setText(raw("三"))
+        self.executor.defer = False
+        self.executor.finish()
+        self.settle_auto()
+        self.assertEqual(self.window.clear_button.text(), "丢弃当前卡")
+        self.assertIn("1", self.window.queue_label.text())
+        self.window.clear_button.click()
+        self.settle_auto()
+        self.assertEqual(self.window.controller.card.front, "三")
+        self.assertIn("0", self.window.queue_label.text())
+        self.assertTrue(self.window.queue_label.isVisible())
+        self.window.clear_button.click()
+        self.settle_auto()
+        self.assertFalse(self.window.queue_label.isVisible())
+        self.assertEqual(self.window.clear_button.text(), "清空")
+        self.assertEqual(self.window.controller.card.front, "")
+        self.assertEqual(self.checker.added, [("一", "日语")])
+
+    def test_main_compact_layout_contains_long_content_at_minimum_size(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("长词" * 30, "例句和释义\n" * 100))
+        self.window._submitted_front = "长词" * 100
+        self.window._submitted_deck = "长牌组" * 60
+        self.window._show_success()
+        self.floating.active = PendingCard(
+            self.window.controller.paste_text,
+            (self.window.controller.card.front, self.window.controller.card.back),
+        )
+        self.floating.sync()
+        image = QImage(24, 24, QImage.Format.Format_RGB32)
+        image.fill(QColor("white"))
+        self.window._attach_image(image)
+        self.window.set_deck("父牌组::" + "很长的目标牌组" * 30)
+        self.window.set_status("⚠ 添加失败：" + "请检查连接和配置；" * 100, "warn")
+        for size in ((500, 700), (980, 700), (980, 900)):
+            for expanded in (False, True):
+                with self.subTest(size=size, expanded=expanded):
+                    self.window.resize(*size)
+                    self.window._set_json_expanded(expanded)
+                    APP.processEvents()
+                    self.assertEqual(self.window.size().toTuple(), size)
+                    root = self.window.centralWidget()
+                    controls = [self.window.paste_toggle, self.window.preview_surface,
+                                self.window.action_row, self.window.success_notice,
+                                self.window.image_action_group, self.window.status_label,
+                                self.window.queue_label]
+                    if expanded:
+                        controls.append(self.window.paste_surface)
+                    for widget in controls:
+                        top_left = widget.mapTo(root, QPoint(0, 0))
+                        self.assertGreaterEqual(top_left.y(), 0)
+                        self.assertGreaterEqual(top_left.x(), 0)
+                        self.assertLessEqual(top_left.y() + widget.height(), root.height())
+                        self.assertLessEqual(top_left.x() + widget.width(), root.width())
+                    self.assertGreaterEqual(self.window.paste_toggle.height(), 36)
+                    self.assertGreaterEqual(self.window.back_box.height(), 86)
+                    for button in (self.window.image_paste_button, self.window.image_source_button):
+                        self.assertTrue(self.window.image_action_group.rect().contains(button.geometry()))
+                    self.assertLessEqual(self.window.add_button.fontMetrics().horizontalAdvance(
+                        self.window.add_button.text()), self.window.add_button.width() - 28)
+                    self.assertGreater(self.window.back_box.verticalScrollBar().maximum(), 0)
+                    self.assertGreater(self.window.front_box.verticalScrollBar().maximum(), 0)
+                    self.assertLess(self.window.preview_surface.geometry().bottom(),
+                                    self.window.action_row.geometry().top())
+                    self.assertLessEqual(self.window.success_notice.height(), 38)
+        self.window.success_close_button.click()
+        self.assertFalse(self.window.success_notice.isVisible())
+        self.assertFalse(self.window._success_timer.isActive())
+
+    def test_main_copies_during_add_are_processed_in_order(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("一"))
+        self.executor.defer = True
+        self.window.controller.add_clicked()
+        APP.clipboard().setText(raw("二"))
+        APP.clipboard().setText(raw("三"))
+        self.assertEqual(self.window.controller.card.front, "一")
+        self.executor.defer = False
+        self.executor.finish()
+        self.settle_auto()
+        self.assertEqual(self.window.controller.card.front, "二")
+        self.assertEqual(self.checker.added, [("一", "日语")])
+        self.window.controller.add_clicked()
+        self.settle_auto()
+        self.assertEqual(self.window.controller.card.front, "三")
+        self.assertEqual(self.checker.added, [("一", "日语"), ("二", "日语")])
+
+    def test_reconnect_then_add_does_not_unlock_an_inflight_submission(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("一"))
+        self.executor.defer = True
+        self.window.connection_popover.reconnect_button.click()
+        self.window.controller.add_clicked()
+        self.assertEqual(len(self.executor.jobs), 1)
+        self.assertFalse(self.window.add_button.isEnabled())
+        self.executor.finish()  # connection check
+        self.executor.finish()  # duplicate check
+        self.assertEqual(self.window.controller.state, State.READY)
+        self.window.controller.add_clicked()
+        self.window.connection_popover.reconnect_button.click()
+        APP.clipboard().setText(raw("二"))
+        self.assertEqual(len(self.executor.jobs), 1)
+        self.assertEqual(self.window.controller.state, State.ADDING)
+        self.assertTrue(self.window.paste_box.isReadOnly())
+        self.assertEqual(self.window.controller.card.front, "一")
+        self.executor.defer = False
+        self.executor.finish()
+        self.settle_auto()
+        self.assertEqual(self.window.controller.card.front, "二")
+        self.assertEqual(self.checker.added, [("一", "日语")])
+
+    def test_last_queued_card_remains_protected_after_edit_and_mode_switch(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("一"))
+        self.executor.defer = True
+        self.window.controller.add_clicked()
+        APP.clipboard().setText(raw("二"))
+        self.executor.defer = False
+        self.executor.finish()
+        self.settle_auto()
+        self.assertEqual(len(self.floating.queue), 0)
+        self.window.paste_box.setPlainText(raw("二", "人工修改"))
+        self.floating.enable()
+        self.floating.open_main()
+        APP.clipboard().setText(raw("三"))
+        self.assertEqual(self.window.controller.card.front, "二")
+        self.assertEqual(self.window.controller.card.back, "人工修改")
+        self.assertEqual(len(self.floating.queue), 1)
+        self.window.controller.clear_clicked()
+        self.settle_auto()
+        self.assertEqual(self.window.controller.card.front, "三")
+
+    def test_image_survives_json_formatting_and_transient_parse_errors(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("一", "释义"))
+        image = QImage(8, 8, QImage.Format.Format_RGB32)
+        image.fill(QColor("white"))
+        self.window._attach_image(image)
+        attachment = self.window.attachment_for_add()
+        for content in (raw("一", "释义") + " ",
+                        '{ "back": "释义", "front": "一" }',
+                        '```json\n' + raw("一", "释义") + '\n```',
+                        '{"front":', raw("一", "释义")):
+            self.window.paste_box.setPlainText(content)
+            self.assertIs(self.window.attachment_for_add(), attachment)
+        self.window.back_box.setPlainText("修订释义")
+        self.window.paste_box.setPlainText(raw("一", "修订释义") + " ")
+        self.assertIs(self.window.attachment_for_add(), attachment)
+        self.window.paste_box.setPlainText('{"front":')
+        self.window.paste_box.setPlainText(raw("二", "新卡"))
+        self.assertIsNone(self.window.attachment_for_add())
+
+    def test_image_is_cleared_when_json_draft_is_erased(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("一"))
+        image = QImage(8, 8, QImage.Format.Format_RGB32)
+        image.fill(QColor("white"))
+        self.window._attach_image(image)
+        self.window.paste_box.clear()
+        self.assertIsNone(self.window.attachment_for_add())
+
+    def test_main_failed_add_keeps_image_and_waiting_cards_until_retry(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("一"))
+        image = QImage(8, 8, QImage.Format.Format_RGB32)
+        image.fill(QColor("white"))
+        self.window._attach_image(image)
+        attachment = self.window.attachment_for_add()
+        self.checker.fail_add = True
+        self.executor.defer = True
+        self.window.controller.add_clicked()
+        APP.clipboard().setText(raw("二"))
+        self.executor.defer = False
+        self.executor.finish()
+        self.settle_auto()
+        APP.clipboard().setText(raw("三"))
+        self.assertEqual(self.window.controller.card.front, "一")
+        self.assertIs(self.window.attachment_for_add(), attachment)
+        self.assertIn("2", self.window.queue_label.text())
+        self.checker.fail_add = False
+        self.window.controller.retry_connection()
+        self.window.controller.add_clicked()
+        self.settle_auto()
+        self.assertEqual(self.window.controller.card.front, "二")
+        self.assertEqual(self.checker.attachments, [attachment])
+        self.assertIsNone(self.window.attachment_for_add())
+        self.window.controller.clear_clicked()
+        self.settle_auto()
+        self.assertEqual(self.window.controller.card.front, "三")
+
+    def test_main_deferred_copy_survives_switch_to_floating(self):
+        self.floating.open_main()
+        self.floating.clipboard = APP.clipboard()
+        APP.clipboard().setText(raw("一"))
+        self.executor.defer = True
+        self.window.controller.add_clicked()
+        APP.clipboard().setText(raw("二"))
+        self.floating.enable()
+        self.executor.defer = False
+        self.executor.finish()
+        self.settle_auto()
+        self.assertTrue(self.floating.success_timer.isActive())
+        self.floating.success_timer.stop()
+        self.floating._after_success()
+        self.assertEqual(self.window.controller.card.front, "二")
+        self.assertEqual(self.floating.pending_count, 1)
+        self.assertEqual(self.checker.added, [("一", "日语")])
+
+    def test_backspace_invalid_json_does_not_open_prompt(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw())
+        self.window.paste_toggle.click()
+        editor = self.window.paste_box
+        editor.setFocus()
+        editor.moveCursor(editor.textCursor().MoveOperation.End)
+        QTest.keyClick(editor, Qt.Key.Key_Backspace)
+        APP.processEvents()
+        self.assertEqual(self.window.controller.state, State.INVALID)
+        self.assertFalse(self.window.prompt_popover.isVisible())
+        self.assertIs(APP.focusWidget(), editor)
+        self.assertIn("无法解析", self.window.status_label.text())
+
+    def test_entering_floating_does_not_reload_main_submitted_clipboard(self):
+        self.floating.open_main()
+        self.floating.clipboard = APP.clipboard()
+        APP.clipboard().setText(raw("一"))
+        self.window.controller.add_clicked()
+        self.settle_auto()
+        self.floating.enable()
+        self.settle_auto()
+        self.assertEqual(self.floating.pending_count, 0)
+        self.assertEqual(self.window.controller.card.front, "")
+        self.assertFalse(self.floating.panel.isVisible())
+
+    def test_discard_then_recopy_same_card_is_allowed_without_poll_replay(self):
+        self.floating.clipboard = APP.clipboard()
+        APP.clipboard().setText(raw("一"))
+        self.floating.ignore()
+        self.settle_auto()
+        self.floating.read_clipboard()
+        self.assertEqual(self.floating.pending_count, 0)
+        APP.clipboard().setText(raw("一"))
+        self.settle_auto()
+        self.assertEqual(self.floating.pending_count, 1)
+        self.floating.ignore()
+        self.settle_auto()
+        APP.clipboard().setText("ordinary text")
+        APP.clipboard().setText('```json\n' + raw("一") + '\n```')
+        self.settle_auto()
+        self.assertEqual(self.floating.pending_count, 1)
+
+    def test_edit_after_reconnect_updates_badge_and_rechecks_capabilities(self):
+        self.checker.offline = True
+        self.window.controller._capabilities_ok = None
+        self.copy(raw("一"))
+        self.checker.offline = False
+        with patch.object(self.checker, "verify_capabilities", wraps=self.checker.verify_capabilities) as verify:
+            self.floating.panel.front_box.setPlainText("二")
+            self.assertTrue(verify.called)
+        self.assertEqual(self.window.controller.state, State.READY)
+        self.assertEqual(self.window.connection_button.property("level"), "ok")
+        self.assertFalse(self.floating.panel.retry_button.isVisible())
+
+    def test_reconnect_edit_does_not_reuse_old_duplicate_check(self):
+        self.copy(raw("一"))
+        self.checker.offline = True
+        self.window.controller.retry_connection()
+        self.checker.offline = False
+        self.checker.added.append(("一", "日语"))
+        self.floating.panel.back_box.setPlainText("修改释义")
+        self.assertEqual(self.window.controller.state, State.DUPLICATE)
+        self.assertEqual(self.window.connection_button.property("level"), "ok")
+
+    def test_reset_prompt_preserves_clipboard(self):
+        self.floating.open_main()
+        for mode in ("text", "image"):
+            self.window._switch_format_prompt_mode(mode)
+            self.window.format_prompt_box.setPlainText("custom")
+            APP.clipboard().setText("keep-this")
+            self.window._reset_format_prompt()
+            self.assertEqual(APP.clipboard().text(), "keep-this")
+
+    def test_main_clear_allows_explicit_recopy_but_not_poll_replay(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("一"))
+        self.window.controller.clear_clicked()
+        self.window._capture_main_clipboard()
+        self.assertEqual(self.window.controller.card.front, "")
+        APP.clipboard().setText(raw("一"))
+        self.assertEqual(self.window.controller.card.front, "一")
+
+    def test_main_deferred_copy_deduplicates_and_recovers_by_polling(self):
+        self.floating.open_main()
+        APP.clipboard().setText(raw("一"))
+        self.executor.defer = True
+        self.window.controller.add_clicked()
+        clipboard = APP.clipboard()
+        clipboard.blockSignals(True)
+        try:
+            clipboard.setText(raw("二"))
+        finally:
+            clipboard.blockSignals(False)
+        self.window._capture_main_clipboard()
+        clipboard.setText('```json\n' + raw("二") + '\n```')
+        clipboard.setText("ordinary text")
+        clipboard.setText('{"front":"incomplete"}')
+        self.assertEqual(len(self.floating.queue), 1)
+        self.executor.defer = False
+        self.executor.finish()
+        self.settle_auto()
+        self.assertEqual(self.window.controller.card.front, "二")
+        self.assertEqual(len(self.floating.queue), 0)
+
+    def test_reconnect_edit_still_blocks_invalid_anki_configuration(self):
+        self.copy(raw("一"))
+        self.checker.offline = True
+        self.window.controller.retry_connection()
+        self.checker.offline = False
+        invalid = Capabilities(6, True, False, False, problem="笔记类型不存在")
+        with patch.object(self.checker, "verify_capabilities", return_value=invalid):
+            self.floating.panel.back_box.setPlainText("修改释义")
+        self.assertEqual(self.window.controller.state, State.ERROR)
+        self.assertFalse(self.floating.panel.add_button.isEnabled())
+        self.assertEqual(self.checker.added, [])
+
+    def test_state_save_preserves_previous_file_on_write_or_replace_failure(self):
+        import app as runtime
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "window.json"
+            original = '{"format_prompt":"old","custom":"preserve"}'
+            path.write_text(original, encoding="utf-8")
+
+            def partial_write(data, handle, **kwargs):
+                handle.write('{"format_prompt":')
+                raise OSError("simulated interrupted write")
+
+            with patch.object(runtime, "_state_path", return_value=str(path)):
+                with patch.object(runtime.json, "dump", side_effect=partial_write):
+                    runtime.save_state(format_prompt="new")
+                self.assertEqual(path.read_text(encoding="utf-8"), original)
+                with patch.object(runtime.os, "replace", side_effect=OSError("replace denied")):
+                    runtime.save_state(format_prompt="new")
+                self.assertEqual(path.read_text(encoding="utf-8"), original)
+                self.assertEqual(list(Path(directory).iterdir()), [path])
+                runtime.save_state(format_prompt="new", image_format_prompt="image", format_prompt_mode="image")
+                self.assertEqual(runtime.load_state(), {
+                    "format_prompt": "new", "custom": "preserve",
+                    "image_format_prompt": "image", "format_prompt_mode": "image",
+                })
+
     def test_main_window_autofills_valid_clipboard_json_without_submitting(self):
         self.floating.open_main()
         clipboard = APP.clipboard()
@@ -206,6 +610,10 @@ class FloatingTests(unittest.TestCase):
         self.assertEqual(self.window.controller.card.front, "主窗口原词")
         APP.clipboard().setText(raw("返回后复制"))
         APP.processEvents()
+        self.assertEqual(self.window.controller.card.front, "主窗口原词")
+        self.assertEqual(len(self.floating.queue), 1)
+        self.window.controller.clear_clicked()
+        self.settle_auto()
         self.assertEqual(self.window.controller.card.front, "返回后复制")
 
     def test_deck_label_no_longer_warns_for_valid_non_default_deck(self):
@@ -213,7 +621,8 @@ class FloatingTests(unittest.TestCase):
         self.window.set_deck("Other")
         self.assertEqual(self.window.deck_label.text(), "牌组")
         self.assertNotIn("非默认", self.window.deck_label.text())
-        self.assertEqual(self.window.add_button.text(), "加入 Other")
+        self.assertTrue(self.window.add_button.text().startswith("加入 "))
+        self.assertEqual(self.window.add_button.toolTip().splitlines()[0], "添加到牌组：Other")
         self.window.set_deck("日语")
         self.assertEqual(self.window.deck_label.text(), "牌组")
         self.assertEqual(self.window.add_button.text(), "加入 Anki")
@@ -925,11 +1334,17 @@ class FloatingTests(unittest.TestCase):
         self.floating.open_main()
         self.assert_popup_is_closed(self.window.deck_box, self.window.close)
 
-    @unittest.skipUnless(sys.platform == "win32", "Windows foreground integration")
+    @unittest.skipUnless(
+        sys.platform == "win32" and os.environ.get("QT_QPA_PLATFORM") == "windows",
+        "Windows foreground integration requires the native Windows Qt backend",
+    )
     def test_external_clipboard_copy_does_not_steal_windows_focus(self):
         self._exercise_external_clipboard(automatic=False)
 
-    @unittest.skipUnless(sys.platform == "win32", "Windows foreground integration")
+    @unittest.skipUnless(
+        sys.platform == "win32" and os.environ.get("QT_QPA_PLATFORM") == "windows",
+        "Windows foreground integration requires the native Windows Qt backend",
+    )
     def test_auto_external_clipboard_adds_without_stealing_focus(self):
         self._exercise_external_clipboard(automatic=True)
 
@@ -974,4 +1389,22 @@ class FloatingTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    if sys.platform == "win32" and os.environ.get("AQA_QT_TEST_MODE") is None:
+        offscreen_env = dict(os.environ, QT_QPA_PLATFORM="offscreen", AQA_QT_TEST_MODE="offscreen")
+        result = subprocess.run([sys.executable, __file__], env=offscreen_env)
+        if result.returncode:
+            raise SystemExit(result.returncode)
+
+        native_env = dict(os.environ, QT_QPA_PLATFORM="windows", AQA_QT_TEST_MODE="native")
+        result = subprocess.run(
+            [
+                sys.executable,
+                __file__,
+                "FloatingTests.test_external_clipboard_copy_does_not_steal_windows_focus",
+                "FloatingTests.test_auto_external_clipboard_adds_without_stealing_focus",
+            ],
+            env=native_env,
+        )
+        raise SystemExit(result.returncode)
+
     unittest.main()

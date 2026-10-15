@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import sys
+import tempfile
 
 from PySide6.QtCore import QRect, QTimer
 from PySide6.QtGui import QIcon
@@ -154,11 +155,26 @@ def save_state(
             data.pop("anki_executable", None)
     if floating_position is not None:
         data["floating_position"] = floating_position
+    path = _state_path()
+    temporary = None
     try:
-        with open(_state_path(), "w", encoding="utf-8") as handle:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=os.path.dirname(path),
+            prefix="window-", suffix=".tmp", delete=False,
+        ) as handle:
+            temporary = handle.name
             json.dump(data, handle, ensure_ascii=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
     except OSError:
         log.exception("保存窗口状态失败")
+    finally:
+        if temporary is not None and os.path.exists(temporary):
+            try:
+                os.unlink(temporary)
+            except OSError:
+                log.exception("清理窗口状态临时文件失败")
 
 
 def _parse_geometry(value: object) -> tuple[int, int, int | None, int | None] | None:

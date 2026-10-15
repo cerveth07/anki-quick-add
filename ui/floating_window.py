@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QLabel, QMenu, QPushButton, QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
 )
 
-from card import CardError, parse_card
 from controller import State
 from ui.theme import FLOAT_CONTROL_SIZE, FLOAT_EDITOR_SIZE, FLOAT_META_SIZE, FLOAT_TITLE_SIZE
 
@@ -369,7 +368,7 @@ class PendingCard:
 
 
 class FloatingCapture(QObject):
-    """Capture valid cards only while floating mode is on; never replace a draft."""
+    """Floating UI and shared pending cards, including copies deferred by main."""
 
     def __init__(self, main):
         super().__init__(main)
@@ -381,8 +380,6 @@ class FloatingCapture(QObject):
         self.closed = False
         self.queue = deque()
         self.active = None
-        self._last_text = ""
-        self._last_key = None
         self._loading = False
         self._finishing = False
         self._submitted_title = ""
@@ -394,7 +391,7 @@ class FloatingCapture(QObject):
         self.orb.moved.connect(self.reposition)
         self.orb.menu_requested.connect(self.show_menu)
         self.clipboard = QApplication.clipboard()
-        self.clipboard.dataChanged.connect(self.read_clipboard)
+        self.clipboard.dataChanged.connect(self._clipboard_changed)
         self.poll_timer = QTimer(self)
         self.poll_timer.setInterval(400)
         self.poll_timer.timeout.connect(self.read_clipboard)
@@ -456,34 +453,39 @@ class FloatingCapture(QObject):
     def persist_position(self):
         self.main._save_state(floating_position=[self.orb.x(), self.orb.y()])
 
-    def read_clipboard(self):
+    def _clipboard_changed(self):
+        self.read_clipboard(copied=True)
+
+    def read_clipboard(self, *, copied=False):
         if not self.enabled or self.closed:
             return
         raw = self.clipboard.text()
-        if raw == self._last_text:
+        card = self.main._read_clipboard_card(raw, copied=copied)
+        if card is None:
             return
-        self._last_text = raw
-        try:
-            card = parse_card(raw)
-        except CardError:
-            return
+        self.enqueue(raw, card, auto_add=self.auto_add)
+
+    def enqueue(self, raw, card, *, auto_add=False):
         key = (card.front, card.back)
-        if key == self._last_key:
-            return
-        self._last_key = key
         if (self.active and key == self.active.key) or any(item.key == key for item in self.queue):
             return
-        self.queue.append(PendingCard(raw, key, auto_add=self.auto_add))
+        self.queue.append(PendingCard(raw, key, auto_add=auto_add))
         self._load_next()
         self.sync()
 
     def _load_next(self):
-        if not self.enabled or self.closed or self.active or self._finishing or self.success_timer.isActive():
+        if self.closed or self.active or self._finishing:
+            return
+        if not self.enabled and not self.main.isVisible():
+            return
+        if self.enabled and self.success_timer.isActive():
             return
         ctl = self.main.controller
         if ctl.state is State.ADDING:
             return
         if ctl.paste_text.strip() or ctl.card.front or ctl.card.back:
+            if not self.enabled:
+                return  # A failed or edited main-window draft still owns the editor.
             self.active = PendingCard(ctl.paste_text, (ctl.card.front, ctl.card.back))
         elif self.queue:
             self.active = self.queue.popleft()
@@ -493,14 +495,16 @@ class FloatingCapture(QObject):
             self._loading = False
         if self.active:
             self.sync()
-            self.reposition()
-            if not (self.auto_add and self.active.auto_add):
-                self.panel.show()  # WA_ShowWithoutActivating: never steal the source app's focus.
+            if self.enabled:
+                self.reposition()
+                if not (self.auto_add and self.active.auto_add):
+                    self.panel.show()  # WA_ShowWithoutActivating: never steal the source app's focus.
 
     def sync(self):
         if self.closed:
             return
         ctl = self.main.controller
+        hint = "已忽略未知字段：" + "、".join(ctl.card.ignored_keys) if ctl.card.ignored_keys else ""
         if self.enabled and not self.active and not self._finishing and (ctl.card.front or ctl.card.back):
             self.active = PendingCard(ctl.paste_text, (ctl.card.front, ctl.card.back))
         for editor, text in ((self.panel.front_box, ctl.card.front), (self.panel.back_box, ctl.card.back)):
@@ -578,6 +582,10 @@ class FloatingCapture(QObject):
             elif ctl.state is State.EMPTY:
                 self.active = None
                 QTimer.singleShot(0, self._load_next)
+        elif self.queue and not self._loading and not self._finishing and ctl.state in (State.EMPTY, State.SUCCESS):
+            QTimer.singleShot(0, self._load_next)
+        # Publish after ownership changes, including discarding the final card.
+        self.main._show_hint(hint)
 
     def _complete(self):
         if self.closed:
@@ -600,6 +608,8 @@ class FloatingCapture(QObject):
             self.reposition()
             self.toast.show()
             self.success_timer.start(2000)
+        elif self.main.isVisible():
+            QTimer.singleShot(0, self._load_next)
 
     def _after_success(self):
         self.toast.hide()
@@ -613,7 +623,7 @@ class FloatingCapture(QObject):
         del blocker
         if self.auto_add:
             # The current clipboard and existing drafts predate this opt-in.
-            self._last_text = self.clipboard.text()
+            self.main._clipboard_last_text = self.clipboard.text()
             self.panel.hide()
             self.toast.hide()
             self.success_timer.stop()
@@ -731,7 +741,7 @@ class FloatingCapture(QObject):
         self.poll_timer.stop()
         self.success_timer.stop()
         self.auto_submit_timer.stop()
-        self.clipboard.dataChanged.disconnect(self.read_clipboard)
+        self.clipboard.dataChanged.disconnect(self._clipboard_changed)
         self.persist_position()
         for widget in (self.orb, self.panel, self.toast):
             widget.close()

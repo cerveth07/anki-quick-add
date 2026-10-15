@@ -122,7 +122,9 @@ class QuickAddController:
             log.info("提交中，忽略重新连接")
             return
 
+        self._invalidate()
         self._capabilities_ok = None
+        self._last_check = None
 
         def after_connection() -> None:
             if self.card.is_complete():
@@ -138,7 +140,9 @@ class QuickAddController:
                 elif not self.paste_text.strip():
                     self._set_state(State.EMPTY, "")
 
-        self._ensure_capabilities(after_connection, connection_only=True)
+        # A complete draft must finish revalidation before it can be submitted.
+        # Only empty/incomplete drafts keep their unrelated editing status.
+        self._ensure_capabilities(after_connection, connection_only=not self.card.is_complete())
 
     def startup(self) -> None:
         gen = self._gen
@@ -154,6 +158,8 @@ class QuickAddController:
         self._ensure_capabilities(done)
 
     def paste_changed(self, raw: str) -> None:
+        if self.state is State.ADDING:
+            return
         self.paste_text = raw
         self._invalidate()
 
@@ -189,10 +195,14 @@ class QuickAddController:
         return f"无法解析 JSON：{text}"
 
     def front_changed(self, text: str) -> None:
+        if self.state is State.ADDING:
+            return
         self.card.front = text
         self._after_edit(recheck=True)
 
     def back_changed(self, text: str) -> None:
+        if self.state is State.ADDING:
+            return
         self.card.back = text
         self._after_edit(recheck=False)
 
@@ -205,6 +215,10 @@ class QuickAddController:
             return
         if not self.card.back.strip():
             self._set_state(State.INVALID, "⚠ 背面为空")
+            return
+        if not self._capabilities_ok:
+            self._last_check = None
+            self._ensure_capabilities(self._schedule_check)
             return
         if recheck:
             self._schedule_check()
@@ -242,6 +256,8 @@ class QuickAddController:
                 log.exception("查重异常", exc_info=error)
                 self._set_state(State.ERROR, f"⚠ 查重失败：{error}")
                 return
+            if result.state in ("READY", "DUPLICATE"):
+                self.view.set_connection("Anki 已连接", "ok")
             self._last_check = (card.front, result)
             self._apply_check(result)
 
@@ -355,6 +371,7 @@ class QuickAddController:
         if not self.card.is_complete():
             return
         self._invalidate()
+        submission_gen = self._gen
         card = snapshot(self.card)
         # Attachment is captured on the UI thread with the text snapshot.
         # Floating capture remains text-only; FakeChecker stays compatible.
@@ -369,6 +386,9 @@ class QuickAddController:
             return self.checker.add(card, deck)
 
         def done(result, error) -> None:
+            if submission_gen != self._gen:
+                log.warning("忽略旧草稿的提交回调，保留当前内容")
+                return
             if error is not None:
                 log.exception("添加异常", exc_info=error)
                 self._set_state(State.ERROR, f"⚠ 添加失败：{error}")
