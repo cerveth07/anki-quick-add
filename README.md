@@ -14,7 +14,7 @@
 - **自定义提示词**：内置纯文本和智能配图两套日语制卡提示词，支持独立编辑和保存。
 - **自动连接**：通过 AnkiConnect 连接 Anki，支持牌组选择与断线重连。
 
-![悬浮制卡界面](docs/floating-preview.png)
+![Anki Quick Add 主窗口](docs/main-window.png)
 
 ## 下载与安装
 
